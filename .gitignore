@@ -1,5 +1,9 @@
+compile_commands.json
+notes/
 zig-out/
+.cache/
 .zig-cache/
 result
 protocols/
+dwc
 

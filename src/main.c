@@ -1,10 +1,8 @@
 #include "dwc.h"
 #include <getopt.h>
 #include <stdio.h>
-#include <wlr/util/log.h>
 
 int main(int argc, char *argv[]) {
-	wlr_log_init(WLR_DEBUG, NULL);
 	char *startup_cmd = NULL;
 
 	int c;
@@ -23,7 +21,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	struct dwc_server server = {0};
+	Dwc_Server server = {0};
 	if (!server_init(&server)) {
 		return 1;
 	}

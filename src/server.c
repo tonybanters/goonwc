@@ -1,144 +1,312 @@
 #include "dwc.h"
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include <unistd.h>
-#include <wlr/backend.h>
-#include <wlr/render/allocator.h>
-#include <wlr/render/wlr_renderer.h>
-#include <wlr/types/wlr_compositor.h>
-#include <wlr/types/wlr_cursor.h>
-#include <wlr/types/wlr_data_device.h>
-#include <wlr/types/wlr_output_layout.h>
-#include <wlr/types/wlr_scene.h>
-#include <wlr/types/wlr_seat.h>
-#include <wlr/types/wlr_subcompositor.h>
-#include <wlr/types/wlr_xcursor_manager.h>
-#include <wlr/types/wlr_xdg_shell.h>
-#include <wlr/util/log.h>
 
-bool server_init(struct dwc_server *server) {
-	server->wl_display = wl_display_create();
-	server->backend = wlr_backend_autocreate(wl_display_get_event_loop(server->wl_display), NULL);
-	if (server->backend == NULL) {
-		wlr_log(WLR_ERROR, "failed to create wlr_backend");
+static Dwc_Toplevel *toplevel_from_window(Dwc_Server *server, Owl_Window *window) {
+	Dwc_Toplevel *toplevel;
+	for (toplevel = server->toplevels; toplevel; toplevel = toplevel->next) {
+		if (toplevel->window == window) {
+			return toplevel;
+		}
+	}
+	return NULL;
+}
+
+static void on_window_create(Owl_Display *display, Owl_Window *window, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	Dwc_Toplevel *toplevel = toplevel_create(server, window);
+	if (toplevel) {
+		toplevel_focus(toplevel);
+	}
+}
+
+static void on_window_destroy(Owl_Display *display, Owl_Window *window, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
+	if (toplevel) {
+		toplevel_destroy(toplevel);
+	}
+}
+
+static void on_window_request_move(Owl_Display *display, Owl_Window *window, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
+	if (toplevel) {
+		begin_interactive(toplevel, DWC_CURSOR_MOVE, 0);
+	}
+}
+
+static void on_window_request_resize(Owl_Display *display, Owl_Window *window, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
+	if (toplevel) {
+		begin_interactive(toplevel, DWC_CURSOR_RESIZE, 0);
+	}
+}
+
+static void on_key_press(Owl_Display *display, Owl_Input *input, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	uint32_t keysym = owl_input_get_keysym(input);
+	uint32_t modifiers = owl_input_get_modifiers(input);
+	handle_keybinding(server, keysym, modifiers);
+}
+
+static void on_pointer_motion(Owl_Display *display, Owl_Input *input, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	int x = owl_input_get_pointer_x(input);
+	int y = owl_input_get_pointer_y(input);
+
+	if (server->cursor_mode == DWC_CURSOR_MOVE) {
+		process_cursor_move(server, x, y);
+	} else if (server->cursor_mode == DWC_CURSOR_RESIZE) {
+		process_cursor_resize(server, x, y);
+	}
+}
+
+static void on_button_press(Owl_Display *display, Owl_Input *input, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	int x = owl_input_get_pointer_x(input);
+	int y = owl_input_get_pointer_y(input);
+
+	Dwc_Toplevel *toplevel = toplevel_at(server, x, y);
+	if (toplevel) {
+		toplevel_focus(toplevel);
+	}
+}
+
+static void on_button_release(Owl_Display *display, Owl_Input *input, void *data) {
+	(void)display;
+	(void)input;
+	Dwc_Server *server = data;
+	reset_cursor_mode(server);
+}
+
+bool server_init(Dwc_Server *server) {
+	memset(server, 0, sizeof(Dwc_Server));
+
+	server->display = owl_display_create();
+	if (!server->display) {
+		fprintf(stderr, "dwc: failed to create owl display\n");
 		return false;
 	}
 
-	server->renderer = wlr_renderer_autocreate(server->backend);
-	if (server->renderer == NULL) {
-		wlr_log(WLR_ERROR, "failed to create wlr_renderer");
-		return false;
-	}
+	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_CREATE, on_window_create, server);
+	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_DESTROY, on_window_destroy, server);
+	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_REQUEST_MOVE, on_window_request_move, server);
+	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_REQUEST_RESIZE, on_window_request_resize, server);
 
-	wlr_renderer_init_wl_display(server->renderer, server->wl_display);
-
-	server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
-	if (server->allocator == NULL) {
-		wlr_log(WLR_ERROR, "failed to create wlr_allocator");
-		return false;
-	}
-
-	wlr_compositor_create(server->wl_display, 5, server->renderer);
-	wlr_subcompositor_create(server->wl_display);
-	wlr_data_device_manager_create(server->wl_display);
-
-	server->output_layout = wlr_output_layout_create(server->wl_display);
-
-	wl_list_init(&server->outputs);
-	server->new_output.notify = server_new_output;
-	wl_signal_add(&server->backend->events.new_output, &server->new_output);
-
-	server->scene = wlr_scene_create();
-	server->scene_layout = wlr_scene_attach_output_layout(server->scene, server->output_layout);
-
-	wl_list_init(&server->toplevels);
-	server->xdg_shell = wlr_xdg_shell_create(server->wl_display, 3);
-	server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
-	wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
-	server->new_xdg_popup.notify = server_new_xdg_popup;
-	wl_signal_add(&server->xdg_shell->events.new_popup, &server->new_xdg_popup);
-
-	server->cursor = wlr_cursor_create();
-	wlr_cursor_attach_output_layout(server->cursor, server->output_layout);
-
-	server->cursor_manager = wlr_xcursor_manager_create(NULL, 24);
+	owl_set_input_callback(server->display, OWL_INPUT_KEY_PRESS, on_key_press, server);
+	owl_set_input_callback(server->display, OWL_INPUT_POINTER_MOTION, on_pointer_motion, server);
+	owl_set_input_callback(server->display, OWL_INPUT_BUTTON_PRESS, on_button_press, server);
+	owl_set_input_callback(server->display, OWL_INPUT_BUTTON_RELEASE, on_button_release, server);
 
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
-	server->cursor_motion.notify = server_cursor_motion;
-	wl_signal_add(&server->cursor->events.motion, &server->cursor_motion);
-	server->cursor_motion_absolute.notify = server_cursor_motion_absolute;
-	wl_signal_add(&server->cursor->events.motion_absolute,
-			&server->cursor_motion_absolute);
-	server->cursor_button.notify = server_cursor_button;
-	wl_signal_add(&server->cursor->events.button, &server->cursor_button);
-	server->cursor_axis.notify = server_cursor_axis;
-	wl_signal_add(&server->cursor->events.axis, &server->cursor_axis);
-	server->cursor_frame.notify = server_cursor_frame;
-	wl_signal_add(&server->cursor->events.frame, &server->cursor_frame);
-
-	wl_list_init(&server->keyboards);
-	server->new_input.notify = server_new_input;
-	wl_signal_add(&server->backend->events.new_input, &server->new_input);
-	server->seat = wlr_seat_create(server->wl_display, "seat0");
-	server->request_cursor.notify = seat_request_cursor;
-	wl_signal_add(&server->seat->events.request_set_cursor,
-			&server->request_cursor);
-	server->pointer_focus_change.notify = seat_pointer_focus_change;
-	wl_signal_add(&server->seat->pointer_state.events.focus_change,
-			&server->pointer_focus_change);
-	server->request_set_selection.notify = seat_request_set_selection;
-	wl_signal_add(&server->seat->events.request_set_selection,
-			&server->request_set_selection);
 
 	return true;
 }
 
-void server_run(struct dwc_server *server, const char *startup_cmd) {
-	const char *socket = wl_display_add_socket_auto(server->wl_display);
-	if (!socket) {
-		wlr_backend_destroy(server->backend);
-		return;
-	}
-
-	if (!wlr_backend_start(server->backend)) {
-		wlr_backend_destroy(server->backend);
-		wl_display_destroy(server->wl_display);
-		return;
-	}
-
-	setenv("WAYLAND_DISPLAY", socket, true);
+void server_run(Dwc_Server *server, const char *startup_cmd) {
 	if (startup_cmd) {
 		if (fork() == 0) {
 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (void *)NULL);
+			_exit(1);
 		}
 	}
-	wlr_log(WLR_INFO, "Running Wayland compositor on WAYLAND_DISPLAY=%s", socket);
-	wl_display_run(server->wl_display);
+
+	fprintf(stderr, "dwc: running on %s\n", owl_display_get_socket_name(server->display));
+	owl_display_run(server->display);
 }
 
-void server_cleanup(struct dwc_server *server) {
-	wl_display_destroy_clients(server->wl_display);
+void server_cleanup(Dwc_Server *server) {
+	while (server->toplevels) {
+		toplevel_destroy(server->toplevels);
+	}
+	owl_display_destroy(server->display);
+}
 
-	wl_list_remove(&server->new_xdg_toplevel.link);
-	wl_list_remove(&server->new_xdg_popup.link);
+Dwc_Toplevel *toplevel_create(Dwc_Server *server, Owl_Window *window) {
+	Dwc_Toplevel *toplevel = calloc(1, sizeof(Dwc_Toplevel));
+	if (!toplevel) {
+		return NULL;
+	}
 
-	wl_list_remove(&server->cursor_motion.link);
-	wl_list_remove(&server->cursor_motion_absolute.link);
-	wl_list_remove(&server->cursor_button.link);
-	wl_list_remove(&server->cursor_axis.link);
-	wl_list_remove(&server->cursor_frame.link);
+	toplevel->server = server;
+	toplevel->window = window;
+	toplevel->pos_x = 0;
+	toplevel->pos_y = 0;
 
-	wl_list_remove(&server->new_input.link);
-	wl_list_remove(&server->request_cursor.link);
-	wl_list_remove(&server->pointer_focus_change.link);
-	wl_list_remove(&server->request_set_selection.link);
+	toplevel->next = server->toplevels;
+	if (server->toplevels) {
+		server->toplevels->prev = toplevel;
+	}
+	server->toplevels = toplevel;
+	server->toplevel_count++;
 
-	wl_list_remove(&server->new_output.link);
+	return toplevel;
+}
 
-	wlr_scene_node_destroy(&server->scene->tree.node);
-	wlr_xcursor_manager_destroy(server->cursor_manager);
-	wlr_cursor_destroy(server->cursor);
-	wlr_allocator_destroy(server->allocator);
-	wlr_renderer_destroy(server->renderer);
-	wlr_backend_destroy(server->backend);
-	wl_display_destroy(server->wl_display);
+void toplevel_destroy(Dwc_Toplevel *toplevel) {
+	if (!toplevel) {
+		return;
+	}
+
+	Dwc_Server *server = toplevel->server;
+
+	if (server->focused == toplevel) {
+		server->focused = NULL;
+	}
+	if (server->grabbed_toplevel == toplevel) {
+		reset_cursor_mode(server);
+	}
+
+	if (toplevel->prev) {
+		toplevel->prev->next = toplevel->next;
+	} else {
+		server->toplevels = toplevel->next;
+	}
+	if (toplevel->next) {
+		toplevel->next->prev = toplevel->prev;
+	}
+
+	server->toplevel_count--;
+	free(toplevel);
+}
+
+void toplevel_focus(Dwc_Toplevel *toplevel) {
+	if (!toplevel) {
+		return;
+	}
+
+	Dwc_Server *server = toplevel->server;
+
+	if (server->focused == toplevel) {
+		return;
+	}
+
+	server->focused = toplevel;
+	owl_window_focus(toplevel->window);
+
+	if (toplevel->prev) {
+		toplevel->prev->next = toplevel->next;
+		if (toplevel->next) {
+			toplevel->next->prev = toplevel->prev;
+		}
+		toplevel->prev = NULL;
+		toplevel->next = server->toplevels;
+		if (server->toplevels) {
+			server->toplevels->prev = toplevel;
+		}
+		server->toplevels = toplevel;
+	}
+}
+
+Dwc_Toplevel *toplevel_at(Dwc_Server *server, int x, int y) {
+	Dwc_Toplevel *toplevel;
+	for (toplevel = server->toplevels; toplevel; toplevel = toplevel->next) {
+		int wx = owl_window_get_x(toplevel->window);
+		int wy = owl_window_get_y(toplevel->window);
+		int ww = owl_window_get_width(toplevel->window);
+		int wh = owl_window_get_height(toplevel->window);
+
+		if (x >= wx && x < wx + ww && y >= wy && y < wy + wh) {
+			return toplevel;
+		}
+	}
+	return NULL;
+}
+
+bool handle_keybinding(Dwc_Server *server, uint32_t keysym, uint32_t modifiers) {
+	if (!(modifiers & OWL_MOD_ALT)) {
+		return false;
+	}
+
+	switch (keysym) {
+	case XKB_KEY_Escape:
+		owl_display_terminate(server->display);
+		return true;
+
+	case XKB_KEY_Return:
+		if (fork() == 0) {
+			execl("/bin/sh", "/bin/sh", "-c", "foot", NULL);
+			_exit(1);
+		}
+		return true;
+
+	case XKB_KEY_q:
+		if (server->focused) {
+			owl_window_close(server->focused->window);
+		}
+		return true;
+
+	case XKB_KEY_F1:
+		if (server->toplevel_count >= 2 && server->toplevels && server->toplevels->next) {
+			Dwc_Toplevel *last = server->toplevels;
+			while (last->next) {
+				last = last->next;
+			}
+			toplevel_focus(last);
+		}
+		return true;
+	}
+
+	return false;
+}
+
+void begin_interactive(Dwc_Toplevel *toplevel, Dwc_Cursor_Mode mode, uint32_t edges) {
+	Dwc_Server *server = toplevel->server;
+
+	server->grabbed_toplevel = toplevel;
+	server->cursor_mode = mode;
+	server->resize_edges = edges;
+
+	server->grab_x = owl_display_get_pointer_x(server->display);
+	server->grab_y = owl_display_get_pointer_y(server->display);
+	server->grab_pos_x = owl_window_get_x(toplevel->window);
+	server->grab_pos_y = owl_window_get_y(toplevel->window);
+	server->grab_width = owl_window_get_width(toplevel->window);
+	server->grab_height = owl_window_get_height(toplevel->window);
+}
+
+void reset_cursor_mode(Dwc_Server *server) {
+	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
+	server->grabbed_toplevel = NULL;
+}
+
+void process_cursor_move(Dwc_Server *server, int x, int y) {
+	Dwc_Toplevel *toplevel = server->grabbed_toplevel;
+	if (!toplevel) {
+		return;
+	}
+
+	int new_x = server->grab_pos_x + (x - (int)server->grab_x);
+	int new_y = server->grab_pos_y + (y - (int)server->grab_y);
+
+	owl_window_move(toplevel->window, new_x, new_y);
+}
+
+void process_cursor_resize(Dwc_Server *server, int x, int y) {
+	Dwc_Toplevel *toplevel = server->grabbed_toplevel;
+	if (!toplevel) {
+		return;
+	}
+
+	int dx = x - (int)server->grab_x;
+	int dy = y - (int)server->grab_y;
+
+	int new_width = server->grab_width + dx;
+	int new_height = server->grab_height + dy;
+
+	if (new_width < 100) new_width = 100;
+	if (new_height < 100) new_height = 100;
+
+	owl_window_resize(toplevel->window, new_width, new_height);
 }
