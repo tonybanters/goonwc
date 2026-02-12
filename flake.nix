@@ -16,6 +16,7 @@
           buildInputs = with pkgs; [
             zig
             pkg-config
+            gdb
 
             wayland
             wayland-protocols
