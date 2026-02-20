@@ -16,26 +16,9 @@
         "type": "github"
       }
     },
-    "owl": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1770919242,
-        "narHash": "sha256-LiOwDqqOu7DmzbBOot57IxZ2v5Qk1le58iAUmSRZsr8=",
-        "owner": "tonybanters",
-        "repo": "owl",
-        "rev": "f9a758bce9e2d1784fe3b2aa6832c28a49b19f79",
-        "type": "github"
-      },
-      "original": {
-        "owner": "tonybanters",
-        "repo": "owl",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
-        "owl": "owl"
+        "nixpkgs": "nixpkgs"
       }
     }
   },

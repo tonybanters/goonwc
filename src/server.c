@@ -1,8 +1,12 @@
 #include "dwc.h"
+#include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+
+/* global server pointer for keybinding functions */
+Dwc_Server *g_server = NULL;
 
 static Dwc_Toplevel *toplevel_from_window(Dwc_Server *server, Owl_Window *window) {
 	Dwc_Toplevel *toplevel;
@@ -14,12 +18,232 @@ static Dwc_Toplevel *toplevel_from_window(Dwc_Server *server, Owl_Window *window
 	return NULL;
 }
 
+bool is_visible(Dwc_Toplevel *toplevel) {
+	return toplevel->tags & toplevel->server->tagset;
+}
+
+static int count_tiled(Dwc_Server *server) {
+	int n = 0;
+	Dwc_Toplevel *t;
+	for (t = server->toplevels; t; t = t->next) {
+		if (is_visible(t) && !t->is_floating && !t->is_fullscreen) {
+			n++;
+		}
+	}
+	return n;
+}
+
+void arrange(Dwc_Server *server) {
+	int output_count = 0;
+	Owl_Output **outputs = owl_get_outputs(server->display, &output_count);
+	if (output_count == 0 || !outputs) return;
+
+	int ww = owl_output_get_width(outputs[0]);
+	int wh = owl_output_get_height(outputs[0]);
+	int oh = gap_outer, ov = gap_outer;
+	int ih = gap_inner, iv = gap_inner;
+
+	Dwc_Toplevel *t;
+	for (t = server->toplevels; t; t = t->next) {
+		if (!is_visible(t)) {
+			owl_window_move(t->window, -9999, -9999);
+		}
+	}
+
+	int n = count_tiled(server);
+	if (n == 0) return;
+
+	int mx = ov;
+	int my = oh;
+	int mw = ww - 2 * ov;
+	int mh = wh - 2 * oh;
+
+	int sx = mx;
+	int sy = my;
+	int sw = mw;
+	int sh = mh;
+
+	if (n > 1) {
+		mw = (int)((ww - 2 * ov - iv) * server->mfact);
+		sw = ww - 2 * ov - iv - mw;
+		sx = mx + mw + iv;
+		sh = wh - 2 * oh - ih * (n - 2);
+	}
+
+	int i = 0;
+	for (t = server->toplevels; t; t = t->next) {
+		if (!is_visible(t) || t->is_floating || t->is_fullscreen)
+			continue;
+
+		if (i == 0) {
+			owl_window_move(t->window, mx, my);
+			owl_window_resize(t->window, mw, mh);
+		} else {
+			int h = sh / (n - 1);
+			int y = sy + (i - 1) * (h + ih);
+			owl_window_move(t->window, sx, y);
+			owl_window_resize(t->window, sw, h);
+		}
+		i++;
+	}
+}
+
+/* keybinding action functions */
+void spawn(void *arg) {
+	Arg_Cmd *a = arg;
+	if (fork() == 0) {
+		setsid();
+		execvp(a->cmd[0], (char *const *)a->cmd);
+		_exit(1);
+	}
+}
+
+void killclient(void *arg) {
+	(void)arg;
+	if (g_server->focused) {
+		owl_window_close(g_server->focused->window);
+	}
+}
+
+void quit(void *arg) {
+	(void)arg;
+	owl_display_terminate(g_server->display);
+}
+
+void view(void *arg) {
+	Arg_Tag *a = arg;
+	if (a->tag == g_server->tagset) return;
+	g_server->tagset = a->tag;
+	arrange(g_server);
+	Dwc_Toplevel *t;
+	for (t = g_server->toplevels; t; t = t->next) {
+		if (is_visible(t)) {
+			toplevel_focus(t);
+			break;
+		}
+	}
+}
+
+void tag(void *arg) {
+	Arg_Tag *a = arg;
+	if (!g_server->focused) return;
+	g_server->focused->tags = a->tag;
+	arrange(g_server);
+	if (!is_visible(g_server->focused)) {
+		Dwc_Toplevel *t;
+		for (t = g_server->toplevels; t; t = t->next) {
+			if (is_visible(t)) {
+				toplevel_focus(t);
+				break;
+			}
+		}
+	}
+}
+
+void toggleview(void *arg) {
+	Arg_Tag *a = arg;
+	unsigned int newtagset = g_server->tagset ^ a->tag;
+	if (newtagset) {
+		g_server->tagset = newtagset;
+		arrange(g_server);
+	}
+}
+
+void toggletag(void *arg) {
+	Arg_Tag *a = arg;
+	if (!g_server->focused) return;
+	unsigned int newtags = g_server->focused->tags ^ a->tag;
+	if (newtags) {
+		g_server->focused->tags = newtags;
+		arrange(g_server);
+	}
+}
+
+void focusstack(void *arg) {
+	Arg_Int *a = arg;
+	if (!g_server->focused) return;
+
+	Dwc_Toplevel *t = g_server->focused;
+	if (a->i > 0) {
+		for (t = t->next; t; t = t->next) {
+			if (is_visible(t)) {
+				toplevel_focus(t);
+				return;
+			}
+		}
+		for (t = g_server->toplevels; t; t = t->next) {
+			if (is_visible(t)) {
+				toplevel_focus(t);
+				return;
+			}
+		}
+	} else {
+		for (t = t->prev; t; t = t->prev) {
+			if (is_visible(t)) {
+				toplevel_focus(t);
+				return;
+			}
+		}
+		Dwc_Toplevel *last = NULL;
+		for (t = g_server->toplevels; t; t = t->next) {
+			if (is_visible(t)) last = t;
+		}
+		if (last) toplevel_focus(last);
+	}
+}
+
+void setmfact(void *arg) {
+	Arg_Int *a = arg;
+	float delta = (float)a->i / 100.0f;
+	float newmfact = g_server->mfact + delta;
+	if (newmfact < 0.1f) newmfact = 0.1f;
+	if (newmfact > 0.9f) newmfact = 0.9f;
+	g_server->mfact = newmfact;
+	arrange(g_server);
+}
+
+void togglefloating(void *arg) {
+	(void)arg;
+	if (!g_server->focused) return;
+	g_server->focused->is_floating = !g_server->focused->is_floating;
+	arrange(g_server);
+}
+
+void zoom(void *arg) {
+	(void)arg;
+	if (!g_server->focused || g_server->focused->is_floating) return;
+
+	Dwc_Toplevel *master = NULL;
+	Dwc_Toplevel *t;
+	for (t = g_server->toplevels; t; t = t->next) {
+		if (is_visible(t) && !t->is_floating) {
+			master = t;
+			break;
+		}
+	}
+
+	if (g_server->focused == master) {
+		for (t = master->next; t; t = t->next) {
+			if (is_visible(t) && !t->is_floating) {
+				toplevel_focus(t);
+				arrange(g_server);
+				return;
+			}
+		}
+	} else {
+		toplevel_focus(g_server->focused);
+		arrange(g_server);
+	}
+}
+
+/* callbacks */
 static void on_window_create(Owl_Display *display, Owl_Window *window, void *data) {
 	(void)display;
 	Dwc_Server *server = data;
 	Dwc_Toplevel *toplevel = toplevel_create(server, window);
 	if (toplevel) {
 		toplevel_focus(toplevel);
+		arrange(server);
 	}
 }
 
@@ -29,6 +253,7 @@ static void on_window_destroy(Owl_Display *display, Owl_Window *window, void *da
 	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
 	if (toplevel) {
 		toplevel_destroy(toplevel);
+		arrange(server);
 	}
 }
 
@@ -37,6 +262,10 @@ static void on_window_request_move(Owl_Display *display, Owl_Window *window, voi
 	Dwc_Server *server = data;
 	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
 	if (toplevel) {
+		if (!toplevel->is_floating) {
+			toplevel->is_floating = true;
+			arrange(server);
+		}
 		begin_interactive(toplevel, DWC_CURSOR_MOVE, 0);
 	}
 }
@@ -46,6 +275,10 @@ static void on_window_request_resize(Owl_Display *display, Owl_Window *window, v
 	Dwc_Server *server = data;
 	Dwc_Toplevel *toplevel = toplevel_from_window(server, window);
 	if (toplevel) {
+		if (!toplevel->is_floating) {
+			toplevel->is_floating = true;
+			arrange(server);
+		}
 		begin_interactive(toplevel, DWC_CURSOR_RESIZE, 0);
 	}
 }
@@ -110,6 +343,10 @@ bool server_init(Dwc_Server *server) {
 	owl_set_input_callback(server->display, OWL_INPUT_BUTTON_RELEASE, on_button_release, server);
 
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
+	server->tagset = 1; /* start on tag 1 */
+	server->mfact = mfact; /* from config.h */
+
+	g_server = server;
 
 	return true;
 }
@@ -143,6 +380,9 @@ Dwc_Toplevel *toplevel_create(Dwc_Server *server, Owl_Window *window) {
 	toplevel->window = window;
 	toplevel->pos_x = 0;
 	toplevel->pos_y = 0;
+	toplevel->tags = server->tagset; /* new windows get current tag */
+	toplevel->is_floating = false;
+	toplevel->is_fullscreen = false;
 
 	toplevel->next = server->toplevels;
 	if (server->toplevels) {
@@ -163,6 +403,15 @@ void toplevel_destroy(Dwc_Toplevel *toplevel) {
 
 	if (server->focused == toplevel) {
 		server->focused = NULL;
+		/* focus next visible window */
+		Dwc_Toplevel *t;
+		for (t = server->toplevels; t; t = t->next) {
+			if (t != toplevel && is_visible(t)) {
+				server->focused = t;
+				owl_window_focus(t->window);
+				break;
+			}
+		}
 	}
 	if (server->grabbed_toplevel == toplevel) {
 		reset_cursor_mode(server);
@@ -195,6 +444,7 @@ void toplevel_focus(Dwc_Toplevel *toplevel) {
 	server->focused = toplevel;
 	owl_window_focus(toplevel->window);
 
+	/* move to front of list (master position for tiling) */
 	if (toplevel->prev) {
 		toplevel->prev->next = toplevel->next;
 		if (toplevel->next) {
@@ -212,6 +462,8 @@ void toplevel_focus(Dwc_Toplevel *toplevel) {
 Dwc_Toplevel *toplevel_at(Dwc_Server *server, int x, int y) {
 	Dwc_Toplevel *toplevel;
 	for (toplevel = server->toplevels; toplevel; toplevel = toplevel->next) {
+		if (!is_visible(toplevel)) continue;
+
 		int wx = owl_window_get_x(toplevel->window);
 		int wy = owl_window_get_y(toplevel->window);
 		int ww = owl_window_get_width(toplevel->window);
@@ -225,37 +477,16 @@ Dwc_Toplevel *toplevel_at(Dwc_Server *server, int x, int y) {
 }
 
 bool handle_keybinding(Dwc_Server *server, uint32_t keysym, uint32_t modifiers) {
-	if (!(modifiers & OWL_MOD_ALT)) {
-		return false;
-	}
+	(void)server;
 
-	switch (keysym) {
-	case XKB_KEY_Escape:
-		owl_display_terminate(server->display);
-		return true;
+	uint32_t relevant_mods = OWL_MOD_SHIFT | OWL_MOD_CTRL | OWL_MOD_ALT | OWL_MOD_SUPER;
+	uint32_t cleaned_mods = modifiers & relevant_mods;
 
-	case XKB_KEY_Return:
-		if (fork() == 0) {
-			execl("/bin/sh", "/bin/sh", "-c", "foot", NULL);
-			_exit(1);
+	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+		if (keys[i].keysym == keysym && keys[i].mod == cleaned_mods) {
+			keys[i].func(keys[i].arg);
+			return true;
 		}
-		return true;
-
-	case XKB_KEY_q:
-		if (server->focused) {
-			owl_window_close(server->focused->window);
-		}
-		return true;
-
-	case XKB_KEY_F1:
-		if (server->toplevel_count >= 2 && server->toplevels && server->toplevels->next) {
-			Dwc_Toplevel *last = server->toplevels;
-			while (last->next) {
-				last = last->next;
-			}
-			toplevel_focus(last);
-		}
-		return true;
 	}
 
 	return false;

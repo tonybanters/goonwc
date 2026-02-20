@@ -19,6 +19,9 @@ struct Dwc_Toplevel {
 	Owl_Window *window;
 	int pos_x;
 	int pos_y;
+	unsigned int tags;      
+	bool is_floating;       
+	bool is_fullscreen;
 	Dwc_Toplevel *next;
 	Dwc_Toplevel *prev;
 };
@@ -29,6 +32,9 @@ struct Dwc_Server {
 	Dwc_Toplevel *toplevels;
 	Dwc_Toplevel *focused;
 	int toplevel_count;
+
+	unsigned int tagset;    
+	float mfact;            
 
 	Dwc_Cursor_Mode cursor_mode;
 	Dwc_Toplevel *grabbed_toplevel;
