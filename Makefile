@@ -18,6 +18,10 @@ PROTOCOL_XML = lib/owl/protocols/xdg-shell.xml
 PROTOCOL_H = build/xdg-shell-protocol.h
 PROTOCOL_C = build/xdg-shell-protocol.c
 
+LAYER_SHELL_XML = lib/owl/protocols/wlr-layer-shell-unstable-v1.xml
+LAYER_SHELL_H = build/wlr-layer-shell-unstable-v1-protocol.h
+LAYER_SHELL_C = build/wlr-layer-shell-unstable-v1-protocol.c
+
 ALL_SRC = $(DWC_SRC) $(OWL_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
@@ -27,7 +31,7 @@ TARGET = dwc
 
 all: $(TARGET)
 
-$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(OBJ)
+$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 build:
@@ -39,7 +43,13 @@ $(PROTOCOL_H): $(PROTOCOL_XML) | build
 $(PROTOCOL_C): $(PROTOCOL_XML) | build
 	wayland-scanner private-code $< $@
 
-%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C)
+$(LAYER_SHELL_H): $(LAYER_SHELL_XML) | build
+	wayland-scanner server-header $< $@
+
+$(LAYER_SHELL_C): $(LAYER_SHELL_XML) | build
+	wayland-scanner private-code $< $@
+
+%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

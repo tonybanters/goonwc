@@ -270,6 +270,51 @@ void owl_render_surface(Owl_Display* display, Owl_Surface* surface, int x, int y
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+/**
+ * owl_layer_surface_get_position() - Calculate position for a layer surface
+ * @ls: the layer surface
+ * @output: the output to render on
+ * @x: output parameter for x position
+ * @y: output parameter for y position
+ *
+ * Calculates the position of a layer surface based on its anchor points,
+ * margins, and the configured size.
+ */
+static void owl_layer_surface_get_position(Owl_Layer_Surface* ls, Owl_Output* output, int* x, int* y) {
+    int out_w = output->width;
+    int out_h = output->height;
+    int surf_w = ls->configured_width;
+    int surf_h = ls->configured_height;
+
+    if (ls->anchor & OWL_ANCHOR_LEFT) {
+        *x = ls->margin_left;
+    } else if (ls->anchor & OWL_ANCHOR_RIGHT) {
+        *x = out_w - surf_w - ls->margin_right;
+    } else {
+        *x = (out_w - surf_w) / 2;
+    }
+
+    if (ls->anchor & OWL_ANCHOR_TOP) {
+        *y = ls->margin_top;
+    } else if (ls->anchor & OWL_ANCHOR_BOTTOM) {
+        *y = out_h - surf_h - ls->margin_bottom;
+    } else {
+        *y = (out_h - surf_h) / 2;
+    }
+}
+
+static void render_layer_surfaces(Owl_Display* display, Owl_Output* output, Owl_Layer layer) {
+    Owl_Layer_Surface* ls;
+    wl_list_for_each(ls, &display->layer_surfaces, link) {
+        if (ls->layer != layer || !ls->mapped || !ls->surface || !ls->surface->has_content) {
+            continue;
+        }
+        int x, y;
+        owl_layer_surface_get_position(ls, output, &x, &y);
+        owl_render_surface(display, ls->surface, x, y);
+    }
+}
+
 void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     if (!display || !output) {
         render_debug("render_frame: null display or output\n");
@@ -298,6 +343,9 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     glUseProgram(shader_program);
     glUniform2f(uniform_screen_size, (float)output->width, (float)output->height);
 
+    render_layer_surfaces(display, output, OWL_LAYER_BACKGROUND);
+    render_layer_surfaces(display, output, OWL_LAYER_BOTTOM);
+
     int window_count = 0;
     int rendered_count = 0;
     Owl_Window* window;
@@ -316,6 +364,9 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
         }
     }
     render_debug("render_frame: windows=%d rendered=%d\n", window_count, rendered_count);
+
+    render_layer_surfaces(display, output, OWL_LAYER_TOP);
+    render_layer_surfaces(display, output, OWL_LAYER_OVERLAY);
 
     if (display->cursor_surface && display->cursor_surface->has_content) {
         int cursor_x = (int)display->pointer_x - display->cursor_hotspot_x;

@@ -100,6 +100,29 @@ struct Owl_Window {
     struct wl_list link;
 };
 
+struct Owl_Layer_Surface {
+    struct Owl_Display* display;
+    Owl_Surface* surface;
+    struct wl_resource* layer_surface_resource;
+    Owl_Output* output;
+    Owl_Layer layer;
+    char* namespace;
+    uint32_t anchor;
+    int32_t exclusive_zone;
+    int32_t margin_top;
+    int32_t margin_right;
+    int32_t margin_bottom;
+    int32_t margin_left;
+    Owl_Keyboard_Interactivity keyboard_interactivity;
+    int32_t width;
+    int32_t height;
+    int32_t configured_width;
+    int32_t configured_height;
+    uint32_t pending_serial;
+    bool mapped;
+    struct wl_list link;
+};
+
 struct Owl_Input {
     uint32_t keycode;
     uint32_t keysym;
@@ -123,6 +146,11 @@ typedef struct {
     Owl_Output_Callback callback;
     void* data;
 } Output_Callback_Entry;
+
+typedef struct {
+    Owl_Layer_Surface_Callback callback;
+    void* data;
+} Layer_Surface_Callback_Entry;
 
 struct Owl_Display {
     struct wl_display* wayland_display;
@@ -164,6 +192,13 @@ struct Owl_Display {
 
     Output_Callback_Entry output_callbacks[3][OWL_MAX_CALLBACKS];
     int output_callback_count[3];
+
+    Layer_Surface_Callback_Entry layer_surface_callbacks[4][OWL_MAX_CALLBACKS];
+    int layer_surface_callback_count[4];
+
+    struct wl_list layer_surfaces;
+    int layer_surface_count;
+    struct wl_global* layer_shell_global;
 
     struct wl_event_source* drm_event_source;
     struct wl_event_source* libinput_event_source;
@@ -209,6 +244,10 @@ void owl_xdg_shell_cleanup(Owl_Display* display);
 void owl_xdg_toplevel_send_configure(Owl_Window* window, int width, int height);
 void owl_xdg_toplevel_send_close(Owl_Window* window);
 void owl_window_map(Owl_Window* window);
+
+void owl_layer_shell_init(Owl_Display* display);
+void owl_layer_shell_cleanup(Owl_Display* display);
+void owl_invoke_layer_surface_callback(Owl_Display* display, Owl_Layer_Surface_Event type, Owl_Layer_Surface* surface);
 
 void owl_seat_init(Owl_Display* display);
 void owl_seat_cleanup(Owl_Display* display);

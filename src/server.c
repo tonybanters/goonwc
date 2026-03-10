@@ -8,6 +8,13 @@
 /* global server pointer for keybinding functions */
 Dwc_Server *g_server = NULL;
 
+/**
+ * toplevel_from_window() - find a toplevel by its associated window
+ * @server: the server containing the toplevel list
+ * @window: the window to match against
+ *
+ * Return: the matching toplevel (or NULL if not found)
+ */
 static Dwc_Toplevel *toplevel_from_window(Dwc_Server *server, Owl_Window *window) {
 	Dwc_Toplevel *toplevel;
 	for (toplevel = server->toplevels; toplevel; toplevel = toplevel->next) {
@@ -93,6 +100,7 @@ void spawn(void *arg) {
 	Arg_Cmd *a = arg;
 	if (fork() == 0) {
 		setsid();
+		setenv("WAYLAND_DISPLAY", owl_display_get_socket_name(g_server->display), 1);
 		execvp(a->cmd[0], (char *const *)a->cmd);
 		_exit(1);
 	}
@@ -354,6 +362,7 @@ bool server_init(Dwc_Server *server) {
 void server_run(Dwc_Server *server, const char *startup_cmd) {
 	if (startup_cmd) {
 		if (fork() == 0) {
+			setenv("WAYLAND_DISPLAY", owl_display_get_socket_name(server->display), 1);
 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (void *)NULL);
 			_exit(1);
 		}

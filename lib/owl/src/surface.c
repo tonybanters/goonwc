@@ -340,6 +340,16 @@ static Owl_Window* find_window_for_surface(Owl_Display* display, Owl_Surface* su
     return NULL;
 }
 
+static Owl_Layer_Surface* find_layer_surface_for_surface(Owl_Display* display, Owl_Surface* surface) {
+    Owl_Layer_Surface* ls;
+    wl_list_for_each(ls, &display->layer_surfaces, link) {
+        if (ls->surface == surface) {
+            return ls;
+        }
+    }
+    return NULL;
+}
+
 static void surface_commit(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
     surf_debug("surface_commit called\n");
@@ -386,6 +396,19 @@ static void surface_commit(struct wl_client* client, struct wl_resource* resourc
             }
             owl_window_map(window);
             surf_debug("  window mapped\n");
+        }
+
+        Owl_Layer_Surface* layer_surface = find_layer_surface_for_surface(surface->display, surface);
+        surf_debug("  layer_surface=%p\n", (void*)layer_surface);
+        if (layer_surface && !layer_surface->mapped) {
+            surf_debug("  mapping layer surface\n");
+            layer_surface->mapped = true;
+            owl_invoke_layer_surface_callback(surface->display, OWL_LAYER_SURFACE_EVENT_MAP, layer_surface);
+            if (layer_surface->keyboard_interactivity == OWL_KEYBOARD_INTERACTIVITY_EXCLUSIVE) {
+                surf_debug("  giving layer surface keyboard focus\n");
+                owl_seat_set_keyboard_focus(surface->display, surface);
+            }
+            surf_debug("  layer surface mapped\n");
         }
 
         surf_debug("  rendering frames\n");

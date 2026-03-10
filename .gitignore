@@ -5,6 +5,8 @@ zig-out/
 .zig-cache/
 result
 protocols/
+build/
 dwc
+*.o
 
 testing-folder/

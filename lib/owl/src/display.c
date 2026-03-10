@@ -194,6 +194,7 @@ Owl_Display* owl_display_create(void) {
     }
 
     wl_list_init(&display->windows);
+    wl_list_init(&display->layer_surfaces);
 
     display->wayland_display = wl_display_create();
     if (!display->wayland_display) {
@@ -245,6 +246,7 @@ Owl_Display* owl_display_create(void) {
     owl_seat_init(display);
     owl_surface_init(display);
     owl_xdg_shell_init(display);
+    owl_layer_shell_init(display);
     owl_render_init(display);
 
     wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
@@ -260,6 +262,7 @@ void owl_display_destroy(Owl_Display* display) {
     }
 
     owl_render_cleanup(display);
+    owl_layer_shell_cleanup(display);
     owl_xdg_shell_cleanup(display);
     owl_surface_cleanup(display);
     owl_seat_cleanup(display);
