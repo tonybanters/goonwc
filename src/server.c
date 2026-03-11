@@ -29,18 +29,34 @@ bool is_visible(Dwc_Toplevel *toplevel) {
 	return toplevel->tags & toplevel->server->tagset;
 }
 
-/* calculate usable area after accounting for layer shell exclusive zones */
+static bool anchored_to(uint32_t anchor, uint32_t edge) {
+	return (anchor & edge) == edge;
+}
+
+/**
+ * get_usable_area() - calculate screen area available for tiling
+ * @server: the server containing display and layer surfaces
+ * @x: output for left edge of usable area
+ * @y: output for top edge of usable area
+ * @w: output for width of usable area
+ * @h: output for height of usable area
+ *
+ * starts with full output dimensions and subtracts exclusive zones
+ * claimed by layer surfaces (panels, bars, docks). A top-anchored
+ * external bar with exclusive_zone=30 would reduce height by 30 and shift
+ * y down by 30.
+ */
 static void get_usable_area(Dwc_Server *server, int *x, int *y, int *w, int *h) {
 	int output_count = 0;
 	Owl_Output **outputs = owl_get_outputs(server->display, &output_count);
+
+    /* early exit if no monitors picked up */
 	if (output_count == 0 || !outputs) {
-		*x = *y = 0;
-		*w = *h = 0;
+		*x = *y = *w = *h = 0;
 		return;
 	}
 
-	*x = 0;
-	*y = 0;
+	*x = *y = 0;
 	*w = owl_output_get_width(outputs[0]);
 	*h = owl_output_get_height(outputs[0]);
 
@@ -48,39 +64,28 @@ static void get_usable_area(Dwc_Server *server, int *x, int *y, int *w, int *h) 
 	Owl_Layer_Surface **layers = owl_get_layer_surfaces(server->display, &layer_count);
 
 	for (int i = 0; i < layer_count; i++) {
-		Owl_Layer_Surface *ls = layers[i];
-		if (!owl_layer_surface_is_mapped(ls)) continue;
+		Owl_Layer_Surface *layer_surface = layers[i];
+		if (!owl_layer_surface_is_mapped(layer_surface)) continue;
 
-		int ez = owl_layer_surface_get_exclusive_zone(ls);
-		if (ez <= 0) continue;
+		int exclusive_zone = owl_layer_surface_get_exclusive_zone(layer_surface);
+		if (exclusive_zone <= 0) continue;
 
-		uint32_t anchor = owl_layer_surface_get_anchor(ls);
-		int margin_top = owl_layer_surface_get_margin_top(ls);
-		int margin_bottom = owl_layer_surface_get_margin_bottom(ls);
-		int margin_left = owl_layer_surface_get_margin_left(ls);
-		int margin_right = owl_layer_surface_get_margin_right(ls);
+		uint32_t anchor = owl_layer_surface_get_anchor(layer_surface);
 
-		/* top anchored */
-		if ((anchor & (OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) ==
-		    (OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) {
-			*y += ez + margin_top + margin_bottom;
-			*h -= ez + margin_top + margin_bottom;
-		}
-		/* bottom anchored */
-		else if ((anchor & (OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) ==
-		         (OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) {
-			*h -= ez + margin_top + margin_bottom;
-		}
-		/* left anchored */
-		else if ((anchor & (OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) ==
-		         (OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) {
-			*x += ez + margin_left + margin_right;
-			*w -= ez + margin_left + margin_right;
-		}
-		/* right anchored */
-		else if ((anchor & (OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) ==
-		         (OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) {
-			*w -= ez + margin_left + margin_right;
+		if (anchored_to(anchor, OWL_ANCHOR_TOP_EDGE)) {
+			int margin = owl_layer_surface_get_margin_top(layer_surface) + owl_layer_surface_get_margin_bottom(layer_surface);
+			*y += exclusive_zone + margin;
+			*h -= exclusive_zone + margin;
+		} else if (anchored_to(anchor, OWL_ANCHOR_BOTTOM_EDGE)) {
+			int margin = owl_layer_surface_get_margin_top(layer_surface) + owl_layer_surface_get_margin_bottom(layer_surface);
+			*h -= exclusive_zone + margin;
+		} else if (anchored_to(anchor, OWL_ANCHOR_LEFT_EDGE)) {
+			int margin = owl_layer_surface_get_margin_left(layer_surface) + owl_layer_surface_get_margin_right(layer_surface);
+			*x += exclusive_zone + margin;
+			*w -= exclusive_zone + margin;
+		} else if (anchored_to(anchor, OWL_ANCHOR_RIGHT_EDGE)) {
+			int margin = owl_layer_surface_get_margin_left(layer_surface) + owl_layer_surface_get_margin_right(layer_surface);
+			*w -= exclusive_zone + margin;
 		}
 	}
 }

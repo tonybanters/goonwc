@@ -9,35 +9,51 @@
 
 static uint32_t layer_surface_configure_serial = 1;
 
-static void layer_surface_set_size(struct wl_client* client, struct wl_resource* resource,
-                                   uint32_t width, uint32_t height) {
+static void layer_surface_set_size(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t width,
+        uint32_t height
+    ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->width = width;
     surface->height = height;
 }
 
-static void layer_surface_set_anchor(struct wl_client* client, struct wl_resource* resource,
-                                     uint32_t anchor) {
+static void layer_surface_set_anchor(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t anchor
+    ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->anchor = anchor;
 }
 
-static void layer_surface_set_exclusive_zone(struct wl_client* client, struct wl_resource* resource,
-                                             int32_t zone) {
+static void layer_surface_set_exclusive_zone(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        int32_t zone
+    ) {
     (void)client;
     Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->exclusive_zone = zone;
 }
 
-static void layer_surface_set_margin(struct wl_client* client, struct wl_resource* resource,
-                                     int32_t top, int32_t right, int32_t bottom, int32_t left) {
+static void layer_surface_set_margin(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        int32_t top,
+        int32_t right,
+        int32_t bottom,
+        int32_t left
+    ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->margin_top = top;
     surface->margin_right = right;
@@ -45,45 +61,59 @@ static void layer_surface_set_margin(struct wl_client* client, struct wl_resourc
     surface->margin_left = left;
 }
 
-static void layer_surface_set_keyboard_interactivity(struct wl_client* client,
-                                                     struct wl_resource* resource,
-                                                     uint32_t keyboard_interactivity) {
+static void layer_surface_set_keyboard_interactivity(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t keyboard_interactivity
+    ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->keyboard_interactivity = keyboard_interactivity;
 }
 
-static void layer_surface_get_popup(struct wl_client* client, struct wl_resource* resource,
-                                    struct wl_resource* popup) {
+static void layer_surface_get_popup(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        struct wl_resource *popup
+    ) {
     (void)client;
     (void)resource;
     (void)popup;
 }
 
-static void layer_surface_ack_configure(struct wl_client* client, struct wl_resource* resource,
-                                        uint32_t serial) {
+static void layer_surface_ack_configure(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t serial
+    ) {
     (void)client;
     (void)serial;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
 }
 
-static void layer_surface_destroy(struct wl_client* client, struct wl_resource* resource) {
+static void layer_surface_destroy(struct wl_client *client, struct wl_resource *resource) {
     (void)client;
     wl_resource_destroy(resource);
 }
 
-static void layer_surface_set_layer(struct wl_client* client, struct wl_resource* resource,
-                                    uint32_t layer) {
+static void layer_surface_set_layer(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t layer
+    ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->layer = layer;
 }
 
-static void layer_surface_set_exclusive_edge(struct wl_client* client, struct wl_resource* resource,
-                                             uint32_t edge) {
+static void layer_surface_set_exclusive_edge(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t edge
+    ) {
     (void)client;
     (void)resource;
     (void)edge;
@@ -156,30 +186,32 @@ static void owl_layer_surface_send_configure(Owl_Layer_Surface* ls, uint32_t wid
     ls->configured_height = height;
     ls->pending_serial = layer_surface_configure_serial;
 
-    zwlr_layer_surface_v1_send_configure(ls->layer_surface_resource,
-                                         layer_surface_configure_serial++, width, height);
+    zwlr_layer_surface_v1_send_configure(ls->layer_surface_resource, layer_surface_configure_serial++, width, height);
 }
 
-static void layer_shell_get_layer_surface(struct wl_client* client, struct wl_resource* resource,
-                                          uint32_t id, struct wl_resource* surface_resource,
-                                          struct wl_resource* output_resource, uint32_t layer,
-                                          const char* namespace) {
-    Owl_Display* display = wl_resource_get_user_data(resource);
-    Owl_Surface* wl_surface = owl_surface_from_resource(surface_resource);
+static void layer_shell_get_layer_surface(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        uint32_t id,
+        struct wl_resource *surface_resource,
+        struct wl_resource *output_resource,
+        uint32_t layer,
+        const char *namespace
+    ) {
+    Owl_Display *display = wl_resource_get_user_data(resource);
+    Owl_Surface *wl_surface = owl_surface_from_resource(surface_resource);
 
     if (!wl_surface) {
-        wl_resource_post_error(resource, ZWLR_LAYER_SHELL_V1_ERROR_ROLE,
-                               "surface is null");
+        wl_resource_post_error(resource, ZWLR_LAYER_SHELL_V1_ERROR_ROLE, "surface is null");
         return;
     }
 
     if (layer > ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY) {
-        wl_resource_post_error(resource, ZWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER,
-                               "invalid layer %d", layer);
+        wl_resource_post_error(resource, ZWLR_LAYER_SHELL_V1_ERROR_INVALID_LAYER, "invalid layer %d", layer);
         return;
     }
 
-    Owl_Layer_Surface* ls = calloc(1, sizeof(Owl_Layer_Surface));
+    Owl_Layer_Surface *ls = calloc(1, sizeof(Owl_Layer_Surface));
     if (!ls) {
         wl_resource_post_no_memory(resource);
         return;
@@ -213,8 +245,7 @@ static void layer_shell_get_layer_surface(struct wl_client* client, struct wl_re
         return;
     }
 
-    wl_resource_set_implementation(ls->layer_surface_resource, &layer_surface_interface,
-                                   ls, layer_surface_destroy_handler);
+    wl_resource_set_implementation(ls->layer_surface_resource, &layer_surface_interface, ls, layer_surface_destroy_handler);
 
     wl_list_insert(&display->layer_surfaces, &ls->link);
     display->layer_surface_count++;
@@ -224,11 +255,10 @@ static void layer_shell_get_layer_surface(struct wl_client* client, struct wl_re
     /* Don't send configure yet - wait for first commit when properties are set */
     ls->initial_configure_sent = false;
 
-    fprintf(stderr, "owl: layer_surface created (layer: %d, namespace: %s)\n",
-            layer, namespace ? namespace : "(null)");
+    fprintf(stderr, "owl: layer_surface created (layer: %d, namespace: %s)\n", layer, namespace ? namespace : "(null)");
 }
 
-static void layer_shell_destroy(struct wl_client* client, struct wl_resource* resource) {
+static void layer_shell_destroy(struct wl_client *client, struct wl_resource *resource) {
     (void)client;
     wl_resource_destroy(resource);
 }
@@ -238,12 +268,11 @@ static const struct zwlr_layer_shell_v1_interface layer_shell_interface = {
     .destroy = layer_shell_destroy,
 };
 
-static void layer_shell_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
+static void layer_shell_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
     Owl_Display* display = data;
 
     uint32_t bound_version = version < 4 ? version : 4;
-    struct wl_resource* resource = wl_resource_create(client, &zwlr_layer_shell_v1_interface,
-                                                      bound_version, id);
+    struct wl_resource* resource = wl_resource_create(client, &zwlr_layer_shell_v1_interface, bound_version, id);
     if (!resource) {
         wl_client_post_no_memory(client);
         return;
@@ -252,9 +281,14 @@ static void layer_shell_bind(struct wl_client* client, void* data, uint32_t vers
     wl_resource_set_implementation(resource, &layer_shell_interface, display, NULL);
 }
 
-void owl_layer_shell_init(Owl_Display* display) {
-    display->layer_shell_global = wl_global_create(display->wayland_display,
-        &zwlr_layer_shell_v1_interface, 4, display, layer_shell_bind);
+void owl_layer_shell_init(Owl_Display *display) {
+    display->layer_shell_global = wl_global_create(
+        display->wayland_display,
+        &zwlr_layer_shell_v1_interface,
+        4,
+        display,
+        layer_shell_bind
+    );
 
     if (!display->layer_shell_global) {
         fprintf(stderr, "owl: failed to create layer_shell global\n");
@@ -264,30 +298,34 @@ void owl_layer_shell_init(Owl_Display* display) {
     fprintf(stderr, "owl: layer-shell initialized\n");
 }
 
-void owl_layer_shell_cleanup(Owl_Display* display) {
+void owl_layer_shell_cleanup(Owl_Display *display) {
     if (display->layer_shell_global) {
         wl_global_destroy(display->layer_shell_global);
         display->layer_shell_global = NULL;
     }
 }
 
-void owl_layer_surface_send_initial_configure(Owl_Layer_Surface* ls) {
-    if (!ls || ls->initial_configure_sent) return;
-    ls->initial_configure_sent = true;
-    owl_layer_surface_send_configure(ls, ls->width, ls->height);
+void owl_layer_surface_send_initial_configure(Owl_Layer_Surface *layer_surface) {
+    if (!layer_surface || layer_surface->initial_configure_sent) return;
+    layer_surface->initial_configure_sent = true;
+    owl_layer_surface_send_configure(layer_surface, layer_surface->width, layer_surface->height);
 }
 
-Owl_Layer_Surface** owl_get_layer_surfaces(Owl_Display* display, int* count) {
-    if (!display || !count) return NULL;
+Owl_Layer_Surface **owl_get_layer_surfaces(Owl_Display *display, int *count) {
+    if (!display || !count) {
+        return NULL;
+    }
 
     *count = display->layer_surface_count;
-    if (*count == 0) return NULL;
+    if (*count == 0) {
+        return NULL;
+    }
 
-    Owl_Layer_Surface** surfaces = calloc(*count, sizeof(Owl_Layer_Surface*));
+    Owl_Layer_Surface **surfaces = calloc(*count, sizeof(Owl_Layer_Surface*));
     if (!surfaces) return NULL;
 
     int i = 0;
-    Owl_Layer_Surface* ls;
+    Owl_Layer_Surface *ls;
     wl_list_for_each(ls, &display->layer_surfaces, link) {
         surfaces[i++] = ls;
         if (i >= *count) break;
@@ -296,50 +334,50 @@ Owl_Layer_Surface** owl_get_layer_surfaces(Owl_Display* display, int* count) {
     return surfaces;
 }
 
-Owl_Layer owl_layer_surface_get_layer(Owl_Layer_Surface* surface) {
+Owl_Layer owl_layer_surface_get_layer(Owl_Layer_Surface *surface) {
     return surface ? surface->layer : OWL_LAYER_BACKGROUND;
 }
 
-uint32_t owl_layer_surface_get_anchor(Owl_Layer_Surface* surface) {
+uint32_t owl_layer_surface_get_anchor(Owl_Layer_Surface *surface) {
     return surface ? surface->anchor : 0;
 }
 
-int owl_layer_surface_get_exclusive_zone(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_exclusive_zone(Owl_Layer_Surface *surface) {
     return surface ? surface->exclusive_zone : 0;
-}
+} 
 
-int owl_layer_surface_get_margin_top(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_margin_top(Owl_Layer_Surface *surface) {
     return surface ? surface->margin_top : 0;
 }
 
-int owl_layer_surface_get_margin_right(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_margin_right(Owl_Layer_Surface *surface) {
     return surface ? surface->margin_right : 0;
 }
 
-int owl_layer_surface_get_margin_bottom(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_margin_bottom(Owl_Layer_Surface *surface) {
     return surface ? surface->margin_bottom : 0;
 }
 
-int owl_layer_surface_get_margin_left(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_margin_left(Owl_Layer_Surface *surface) {
     return surface ? surface->margin_left : 0;
 }
 
-Owl_Keyboard_Interactivity owl_layer_surface_get_keyboard_interactivity(Owl_Layer_Surface* surface) {
+Owl_Keyboard_Interactivity owl_layer_surface_get_keyboard_interactivity(Owl_Layer_Surface *surface) {
     return surface ? surface->keyboard_interactivity : OWL_KEYBOARD_INTERACTIVITY_NONE;
 }
 
-int owl_layer_surface_get_width(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_width(Owl_Layer_Surface *surface) {
     return surface ? surface->configured_width : 0;
 }
 
-int owl_layer_surface_get_height(Owl_Layer_Surface* surface) {
+int owl_layer_surface_get_height(Owl_Layer_Surface *surface) {
     return surface ? surface->configured_height : 0;
 }
 
-const char* owl_layer_surface_get_namespace(Owl_Layer_Surface* surface) {
+const char* owl_layer_surface_get_namespace(Owl_Layer_Surface *surface) {
     return surface ? surface->namespace : NULL;
 }
 
-bool owl_layer_surface_is_mapped(Owl_Layer_Surface* surface) {
+bool owl_layer_surface_is_mapped(Owl_Layer_Surface *surface) {
     return surface ? surface->mapped : false;
 }
