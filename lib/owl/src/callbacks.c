@@ -74,18 +74,22 @@ void owl_invoke_window_callback(Owl_Display* display, Owl_Window_Event type, Owl
     }
 }
 
-void owl_invoke_input_callback(Owl_Display* display, Owl_Input_Event type, Owl_Input* input) {
+bool owl_invoke_input_callback(Owl_Display* display, Owl_Input_Event type, Owl_Input* input) {
     if (!display || type < 0 || type > OWL_INPUT_POINTER_MOTION) {
-        return;
+        return false;
     }
 
+    bool handled = false;
     int count = display->input_callback_count[type];
     for (int index = 0; index < count; index++) {
         Input_Callback_Entry* entry = &display->input_callbacks[type][index];
         if (entry->callback) {
-            entry->callback(display, input, entry->data);
+            if (entry->callback(display, input, entry->data)) {
+                handled = true;
+            }
         }
     }
+    return handled;
 }
 
 void owl_invoke_output_callback(Owl_Display* display, Owl_Output_Event type, Owl_Output* output) {

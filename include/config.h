@@ -5,8 +5,7 @@
 #include <owl/owl.h>
 
 /* appearance */
-static const int gap_inner  = 10;
-static const int gap_outer  = 10;
+static const int gap        = 5;    /* gap size in pixels (outer and inner) */
 static const float mfact    = 0.55; /* master area size [0.05..0.95] */
 
 /* tagging */
@@ -14,7 +13,7 @@ static const float mfact    = 0.55; /* master area size [0.05..0.95] */
 
 /* commands */
 static const char *termcmd[]  = { "foot", NULL };
-static const char *menucmd[]  = { "dmenu_run", NULL };
+static const char *menucmd[]  = { "rofi", "-show", "drun", NULL };
 
 /* key definitions */
 #define MOD OWL_MOD_ALT

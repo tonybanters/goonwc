@@ -11,6 +11,7 @@
 #define OWL_MAX_OUTPUTS 8
 #define OWL_MAX_WINDOWS 256
 #define OWL_MAX_CALLBACKS 16
+#define OWL_MAX_WORKSPACES 32
 
 struct Owl_Output {
     struct Owl_Display* display;
@@ -88,13 +89,18 @@ struct Owl_Window {
     struct wl_resource* xdg_toplevel_resource;
     int pos_x;
     int pos_y;
-    int width;
-    int height;
+    int width;   /* compositor-requested width */
+    int height;  /* compositor-requested height */
+    int geometry_x;      /* client-reported geometry x offset */
+    int geometry_y;      /* client-reported geometry y offset */
+    int geometry_width;  /* client-reported geometry width */
+    int geometry_height; /* client-reported geometry height */
     char* title;
     char* app_id;
     bool fullscreen;
     bool focused;
     bool mapped;
+    bool tiled;
     uint32_t pending_serial;
     bool pending_configure;
     struct wl_list link;
@@ -120,6 +126,7 @@ struct Owl_Layer_Surface {
     int32_t configured_height;
     uint32_t pending_serial;
     bool mapped;
+    bool initial_configure_sent;
     struct wl_list link;
 };
 
@@ -151,6 +158,21 @@ typedef struct {
     Owl_Layer_Surface_Callback callback;
     void* data;
 } Layer_Surface_Callback_Entry;
+
+typedef struct {
+    Owl_Workspace_Callback callback;
+    void* data;
+} Workspace_Callback_Entry;
+
+struct Owl_Workspace {
+    struct Owl_Display* display;
+    char* name;
+    char* id;
+    uint32_t state;
+    int32_t coordinate;
+    struct wl_list resources;
+    struct wl_list link;
+};
 
 struct Owl_Display {
     struct wl_display* wayland_display;
@@ -200,6 +222,15 @@ struct Owl_Display {
     int layer_surface_count;
     struct wl_global* layer_shell_global;
 
+    struct wl_list workspaces;
+    int workspace_count;
+    struct wl_global* workspace_manager_global;
+    struct wl_list workspace_manager_resources;
+    struct wl_list workspace_group_resources;
+
+    Workspace_Callback_Entry workspace_callbacks[3][OWL_MAX_CALLBACKS];
+    int workspace_callback_count[3];
+
     struct wl_event_source* drm_event_source;
     struct wl_event_source* libinput_event_source;
 
@@ -231,7 +262,7 @@ void owl_render_cleanup(Owl_Display* display);
 void owl_render_frame(Owl_Display* display, Owl_Output* output);
 
 void owl_invoke_window_callback(Owl_Display* display, Owl_Window_Event type, Owl_Window* window);
-void owl_invoke_input_callback(Owl_Display* display, Owl_Input_Event type, Owl_Input* input);
+bool owl_invoke_input_callback(Owl_Display* display, Owl_Input_Event type, Owl_Input* input);
 void owl_invoke_output_callback(Owl_Display* display, Owl_Output_Event type, Owl_Output* output);
 
 void owl_surface_init(Owl_Display* display);
@@ -248,6 +279,7 @@ void owl_window_map(Owl_Window* window);
 void owl_layer_shell_init(Owl_Display* display);
 void owl_layer_shell_cleanup(Owl_Display* display);
 void owl_invoke_layer_surface_callback(Owl_Display* display, Owl_Layer_Surface_Event type, Owl_Layer_Surface* surface);
+void owl_layer_surface_send_initial_configure(Owl_Layer_Surface* ls);
 
 void owl_seat_init(Owl_Display* display);
 void owl_seat_cleanup(Owl_Display* display);
@@ -260,5 +292,12 @@ void owl_seat_send_pointer_button(Owl_Display* display, uint32_t button, uint32_
 
 uint32_t owl_render_upload_texture(Owl_Display* display, Owl_Surface* surface);
 void owl_render_surface(Owl_Display* display, Owl_Surface* surface, int x, int y);
+
+void owl_workspace_init(Owl_Display* display);
+void owl_workspace_cleanup(Owl_Display* display);
+void owl_invoke_workspace_callback(Owl_Display* display, Owl_Workspace_Event type, Owl_Workspace* workspace);
+
+void owl_decoration_init(Owl_Display* display);
+void owl_decoration_cleanup(Owl_Display* display);
 
 #endif

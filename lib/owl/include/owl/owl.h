@@ -9,6 +9,7 @@ typedef struct Owl_Window Owl_Window;
 typedef struct Owl_Output Owl_Output;
 typedef struct Owl_Input Owl_Input;
 typedef struct Owl_Layer_Surface Owl_Layer_Surface;
+typedef struct Owl_Workspace Owl_Workspace;
 
 typedef enum {
     OWL_LAYER_BACKGROUND = 0,
@@ -66,8 +67,22 @@ typedef enum {
     OWL_LAYER_SURFACE_EVENT_UNMAP,
 } Owl_Layer_Surface_Event;
 
+typedef enum {
+    OWL_WORKSPACE_STATE_ACTIVE = 1,
+    OWL_WORKSPACE_STATE_URGENT = 2,
+    OWL_WORKSPACE_STATE_HIDDEN = 4,
+} Owl_Workspace_State;
+
+typedef enum {
+    OWL_WORKSPACE_EVENT_ACTIVATE,
+    OWL_WORKSPACE_EVENT_DEACTIVATE,
+    OWL_WORKSPACE_EVENT_REMOVE,
+} Owl_Workspace_Event;
+
+typedef void (*Owl_Workspace_Callback)(Owl_Display* display, Owl_Workspace* workspace, void* data);
+
 typedef void (*Owl_Window_Callback)(Owl_Display* display, Owl_Window* window, void* data);
-typedef void (*Owl_Input_Callback)(Owl_Display* display, Owl_Input* input, void* data);
+typedef bool (*Owl_Input_Callback)(Owl_Display* display, Owl_Input* input, void* data);
 typedef void (*Owl_Output_Callback)(Owl_Display* display, Owl_Output* output, void* data);
 typedef void (*Owl_Layer_Surface_Callback)(Owl_Display* display, Owl_Layer_Surface* surface, void* data);
 
@@ -85,6 +100,7 @@ void owl_window_move(Owl_Window* window, int x, int y);
 void owl_window_resize(Owl_Window* window, int width, int height);
 void owl_window_close(Owl_Window* window);
 void owl_window_set_fullscreen(Owl_Window* window, bool fullscreen);
+void owl_window_set_tiled(Owl_Window* window, bool tiled);
 
 int owl_window_get_x(Owl_Window* window);
 int owl_window_get_y(Owl_Window* window);
@@ -132,5 +148,14 @@ int owl_input_get_pointer_y(Owl_Input* input);
 #define OWL_MOD_CTRL    (1 << 1)
 #define OWL_MOD_ALT     (1 << 2)
 #define OWL_MOD_SUPER   (1 << 3)
+
+Owl_Workspace* owl_workspace_create(Owl_Display* display, const char* name);
+void owl_workspace_destroy(Owl_Workspace* workspace);
+void owl_workspace_set_state(Owl_Workspace* workspace, uint32_t state);
+void owl_workspace_set_coordinates(Owl_Workspace* workspace, int32_t x);
+void owl_workspace_commit(Owl_Display* display);
+const char* owl_workspace_get_name(Owl_Workspace* workspace);
+uint32_t owl_workspace_get_state(Owl_Workspace* workspace);
+void owl_set_workspace_callback(Owl_Display* display, Owl_Workspace_Event type, Owl_Workspace_Callback callback, void* data);
 
 #endif

@@ -221,7 +221,8 @@ static void layer_shell_get_layer_surface(struct wl_client* client, struct wl_re
 
     owl_invoke_layer_surface_callback(display, OWL_LAYER_SURFACE_EVENT_CREATE, ls);
 
-    owl_layer_surface_send_configure(ls, ls->width, ls->height);
+    /* Don't send configure yet - wait for first commit when properties are set */
+    ls->initial_configure_sent = false;
 
     fprintf(stderr, "owl: layer_surface created (layer: %d, namespace: %s)\n",
             layer, namespace ? namespace : "(null)");
@@ -268,6 +269,12 @@ void owl_layer_shell_cleanup(Owl_Display* display) {
         wl_global_destroy(display->layer_shell_global);
         display->layer_shell_global = NULL;
     }
+}
+
+void owl_layer_surface_send_initial_configure(Owl_Layer_Surface* ls) {
+    if (!ls || ls->initial_configure_sent) return;
+    ls->initial_configure_sent = true;
+    owl_layer_surface_send_configure(ls, ls->width, ls->height);
 }
 
 Owl_Layer_Surface** owl_get_layer_surfaces(Owl_Display* display, int* count) {

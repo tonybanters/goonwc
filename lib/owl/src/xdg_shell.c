@@ -183,6 +183,18 @@ static void send_toplevel_configure(Owl_Window* window) {
         *state = XDG_TOPLEVEL_STATE_FULLSCREEN;
     }
 
+    if (window->tiled) {
+        uint32_t* s;
+        s = wl_array_add(&states, sizeof(uint32_t));
+        *s = XDG_TOPLEVEL_STATE_TILED_LEFT;
+        s = wl_array_add(&states, sizeof(uint32_t));
+        *s = XDG_TOPLEVEL_STATE_TILED_RIGHT;
+        s = wl_array_add(&states, sizeof(uint32_t));
+        *s = XDG_TOPLEVEL_STATE_TILED_TOP;
+        s = wl_array_add(&states, sizeof(uint32_t));
+        *s = XDG_TOPLEVEL_STATE_TILED_BOTTOM;
+    }
+
     xdg_toplevel_send_configure(window->xdg_toplevel_resource,
                                 window->width, window->height, &states);
 
@@ -274,18 +286,20 @@ static void xdg_surface_get_popup(struct wl_client* client, struct wl_resource* 
 static void xdg_surface_set_window_geometry(struct wl_client* client, struct wl_resource* resource,
                                             int32_t x, int32_t y, int32_t width, int32_t height) {
     (void)client;
-    (void)x;
-    (void)y;
 
     Owl_Window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
 
-    if (window->width != width || window->height != height) {
-        window->width = width;
-        window->height = height;
+    if (x != 0 || y != 0) {
+        fprintf(stderr, "owl: geometry offset x=%d y=%d\n", x, y);
     }
+
+    window->geometry_x = x;
+    window->geometry_y = y;
+    window->geometry_width = width;
+    window->geometry_height = height;
 }
 
 static void xdg_surface_ack_configure(struct wl_client* client, struct wl_resource* resource,

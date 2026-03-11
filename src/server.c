@@ -29,6 +29,62 @@ bool is_visible(Dwc_Toplevel *toplevel) {
 	return toplevel->tags & toplevel->server->tagset;
 }
 
+/* calculate usable area after accounting for layer shell exclusive zones */
+static void get_usable_area(Dwc_Server *server, int *x, int *y, int *w, int *h) {
+	int output_count = 0;
+	Owl_Output **outputs = owl_get_outputs(server->display, &output_count);
+	if (output_count == 0 || !outputs) {
+		*x = *y = 0;
+		*w = *h = 0;
+		return;
+	}
+
+	*x = 0;
+	*y = 0;
+	*w = owl_output_get_width(outputs[0]);
+	*h = owl_output_get_height(outputs[0]);
+
+	int layer_count = 0;
+	Owl_Layer_Surface **layers = owl_get_layer_surfaces(server->display, &layer_count);
+
+	for (int i = 0; i < layer_count; i++) {
+		Owl_Layer_Surface *ls = layers[i];
+		if (!owl_layer_surface_is_mapped(ls)) continue;
+
+		int ez = owl_layer_surface_get_exclusive_zone(ls);
+		if (ez <= 0) continue;
+
+		uint32_t anchor = owl_layer_surface_get_anchor(ls);
+		int margin_top = owl_layer_surface_get_margin_top(ls);
+		int margin_bottom = owl_layer_surface_get_margin_bottom(ls);
+		int margin_left = owl_layer_surface_get_margin_left(ls);
+		int margin_right = owl_layer_surface_get_margin_right(ls);
+
+		/* top anchored */
+		if ((anchor & (OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) ==
+		    (OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) {
+			*y += ez + margin_top + margin_bottom;
+			*h -= ez + margin_top + margin_bottom;
+		}
+		/* bottom anchored */
+		else if ((anchor & (OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) ==
+		         (OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT)) {
+			*h -= ez + margin_top + margin_bottom;
+		}
+		/* left anchored */
+		else if ((anchor & (OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) ==
+		         (OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) {
+			*x += ez + margin_left + margin_right;
+			*w -= ez + margin_left + margin_right;
+		}
+		/* right anchored */
+		else if ((anchor & (OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) ==
+		         (OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM)) {
+			*w -= ez + margin_left + margin_right;
+		}
+	}
+}
+
 static int count_tiled(Dwc_Server *server) {
 	int n = 0;
 	Dwc_Toplevel *t;
@@ -41,14 +97,15 @@ static int count_tiled(Dwc_Server *server) {
 }
 
 void arrange(Dwc_Server *server) {
-	int output_count = 0;
-	Owl_Output **outputs = owl_get_outputs(server->display, &output_count);
-	if (output_count == 0 || !outputs) return;
+	fprintf(stderr, "dwc: arrange called\n");
+	fflush(stderr);
+	int ax, ay, aw, ah;
+	get_usable_area(server, &ax, &ay, &aw, &ah);
+	fprintf(stderr, "dwc: usable area x=%d y=%d w=%d h=%d\n", ax, ay, aw, ah);
+	fflush(stderr);
+	if (aw <= 0 || ah <= 0) return;
 
-	int ww = owl_output_get_width(outputs[0]);
-	int wh = owl_output_get_height(outputs[0]);
-	int oh = gap_outer, ov = gap_outer;
-	int ih = gap_inner, iv = gap_inner;
+	int g = gap;
 
 	Dwc_Toplevel *t;
 	for (t = server->toplevels; t; t = t->next) {
@@ -60,36 +117,51 @@ void arrange(Dwc_Server *server) {
 	int n = count_tiled(server);
 	if (n == 0) return;
 
-	int mx = ov;
-	int my = oh;
-	int mw = ww - 2 * ov;
-	int mh = wh - 2 * oh;
-
-	int sx = mx;
-	int sy = my;
-	int sw = mw;
-	int sh = mh;
-
-	if (n > 1) {
-		mw = (int)((ww - 2 * ov - iv) * server->mfact);
-		sw = ww - 2 * ov - iv - mw;
-		sx = mx + mw + iv;
-		sh = wh - 2 * oh - ih * (n - 2);
+	/* single window fills usable area minus gaps */
+	if (n == 1) {
+		for (t = server->toplevels; t; t = t->next) {
+			if (is_visible(t) && !t->is_floating && !t->is_fullscreen) {
+				owl_window_set_tiled(t->window, true);
+				owl_window_move(t->window, ax + g, ay + g);
+				owl_window_resize(t->window, aw - 2 * g, ah - 2 * g);
+				break;
+			}
+		}
+		return;
 	}
 
+	/* available width after outer gaps (left, right) and inner gap */
+	int available_w = aw - 3 * g;
+	int master_w = (int)(available_w * server->mfact);
+	int stack_w = available_w - master_w;
+
 	int i = 0;
+	int ty = ay + g;
+	int stack_count = n - 1;
+
 	for (t = server->toplevels; t; t = t->next) {
 		if (!is_visible(t) || t->is_floating || t->is_fullscreen)
 			continue;
 
+		owl_window_set_tiled(t->window, true);
+
 		if (i == 0) {
+			/* master window: outer gap on left, top, bottom */
+			int mx = ax + g;
+			int my = ay + g;
+			int mheight = ah - 2 * g;
+			fprintf(stderr, "dwc: master x=%d y=%d w=%d h=%d\n", mx, my, master_w, mheight);
 			owl_window_move(t->window, mx, my);
-			owl_window_resize(t->window, mw, mh);
+			owl_window_resize(t->window, master_w, mheight);
 		} else {
-			int h = sh / (n - 1);
-			int y = sy + (i - 1) * (h + ih);
-			owl_window_move(t->window, sx, y);
-			owl_window_resize(t->window, sw, h);
+			/* stack windows: inner gap from master, outer gap on right */
+			int remaining = stack_count - (i - 1);
+			int h = (ay + ah - ty - g - (remaining - 1) * g) / remaining;
+			int sx = ax + g + master_w + g;
+			fprintf(stderr, "dwc: stack[%d] x=%d y=%d w=%d h=%d\n", i-1, sx, ty, stack_w, h);
+			owl_window_move(t->window, sx, ty);
+			owl_window_resize(t->window, stack_w, h);
+			ty += h + g;
 		}
 		i++;
 	}
@@ -101,6 +173,10 @@ void spawn(void *arg) {
 	if (fork() == 0) {
 		setsid();
 		setenv("WAYLAND_DISPLAY", owl_display_get_socket_name(g_server->display), 1);
+		setenv("XDG_SESSION_TYPE", "wayland", 1);
+		setenv("XDG_CURRENT_DESKTOP", "dwc", 1);
+		setenv("TERM", "xterm-256color", 1);
+		setenv("COLORTERM", "truecolor", 1);
 		execvp(a->cmd[0], (char *const *)a->cmd);
 		_exit(1);
 	}
@@ -118,10 +194,21 @@ void quit(void *arg) {
 	owl_display_terminate(g_server->display);
 }
 
+static void update_workspace_states(Dwc_Server *server) {
+	for (int i = 0; i < 9; i++) {
+		if (server->workspaces[i]) {
+			uint32_t state = (server->tagset & (1 << i)) ? OWL_WORKSPACE_STATE_ACTIVE : 0;
+			owl_workspace_set_state(server->workspaces[i], state);
+		}
+	}
+	owl_workspace_commit(server->display);
+}
+
 void view(void *arg) {
 	Arg_Tag *a = arg;
 	if (a->tag == g_server->tagset) return;
 	g_server->tagset = a->tag;
+	update_workspace_states(g_server);
 	arrange(g_server);
 	Dwc_Toplevel *t;
 	for (t = g_server->toplevels; t; t = t->next) {
@@ -291,15 +378,15 @@ static void on_window_request_resize(Owl_Display *display, Owl_Window *window, v
 	}
 }
 
-static void on_key_press(Owl_Display *display, Owl_Input *input, void *data) {
+static bool on_key_press(Owl_Display *display, Owl_Input *input, void *data) {
 	(void)display;
 	Dwc_Server *server = data;
 	uint32_t keysym = owl_input_get_keysym(input);
 	uint32_t modifiers = owl_input_get_modifiers(input);
-	handle_keybinding(server, keysym, modifiers);
+	return handle_keybinding(server, keysym, modifiers);
 }
 
-static void on_pointer_motion(Owl_Display *display, Owl_Input *input, void *data) {
+static bool on_pointer_motion(Owl_Display *display, Owl_Input *input, void *data) {
 	(void)display;
 	Dwc_Server *server = data;
 	int x = owl_input_get_pointer_x(input);
@@ -307,12 +394,15 @@ static void on_pointer_motion(Owl_Display *display, Owl_Input *input, void *data
 
 	if (server->cursor_mode == DWC_CURSOR_MOVE) {
 		process_cursor_move(server, x, y);
+		return true;
 	} else if (server->cursor_mode == DWC_CURSOR_RESIZE) {
 		process_cursor_resize(server, x, y);
+		return true;
 	}
+	return false;
 }
 
-static void on_button_press(Owl_Display *display, Owl_Input *input, void *data) {
+static bool on_button_press(Owl_Display *display, Owl_Input *input, void *data) {
 	(void)display;
 	Dwc_Server *server = data;
 	int x = owl_input_get_pointer_x(input);
@@ -322,13 +412,47 @@ static void on_button_press(Owl_Display *display, Owl_Input *input, void *data) 
 	if (toplevel) {
 		toplevel_focus(toplevel);
 	}
+	return false; /* don't consume button events */
 }
 
-static void on_button_release(Owl_Display *display, Owl_Input *input, void *data) {
+static bool on_button_release(Owl_Display *display, Owl_Input *input, void *data) {
 	(void)display;
 	(void)input;
 	Dwc_Server *server = data;
 	reset_cursor_mode(server);
+	return false; /* don't consume button events */
+}
+
+static void on_workspace_activate(Owl_Display *display, Owl_Workspace *workspace, void *data) {
+	(void)display;
+	Dwc_Server *server = data;
+	const char *name = owl_workspace_get_name(workspace);
+	if (name && name[0] >= '1' && name[0] <= '9') {
+		int tag_index = name[0] - '1';
+		Arg_Tag arg = { .tag = 1u << tag_index };
+		g_server = server;
+		view(&arg);
+	}
+}
+
+static void on_workspace_deactivate(Owl_Display *display, Owl_Workspace *workspace, void *data) {
+	(void)display;
+	(void)workspace;
+	(void)data;
+}
+
+static void on_layer_surface_map(Owl_Display *display, Owl_Layer_Surface *surface, void *data) {
+	(void)display;
+	(void)surface;
+	Dwc_Server *server = data;
+	arrange(server);
+}
+
+static void on_layer_surface_unmap(Owl_Display *display, Owl_Layer_Surface *surface, void *data) {
+	(void)display;
+	(void)surface;
+	Dwc_Server *server = data;
+	arrange(server);
 }
 
 bool server_init(Dwc_Server *server) {
@@ -350,9 +474,26 @@ bool server_init(Dwc_Server *server) {
 	owl_set_input_callback(server->display, OWL_INPUT_BUTTON_PRESS, on_button_press, server);
 	owl_set_input_callback(server->display, OWL_INPUT_BUTTON_RELEASE, on_button_release, server);
 
+	owl_set_workspace_callback(server->display, OWL_WORKSPACE_EVENT_ACTIVATE, on_workspace_activate, server);
+	owl_set_workspace_callback(server->display, OWL_WORKSPACE_EVENT_DEACTIVATE, on_workspace_deactivate, server);
+
+	owl_set_layer_surface_callback(server->display, OWL_LAYER_SURFACE_EVENT_MAP, on_layer_surface_map, server);
+	owl_set_layer_surface_callback(server->display, OWL_LAYER_SURFACE_EVENT_UNMAP, on_layer_surface_unmap, server);
+
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
 	server->tagset = 1; /* start on tag 1 */
 	server->mfact = mfact; /* from config.h */
+
+	/* create 9 workspaces (1-9) */
+	for (int i = 0; i < 9; i++) {
+		char name[2] = { '1' + i, '\0' };
+		server->workspaces[i] = owl_workspace_create(server->display, name);
+	}
+	/* tag 1 is active initially */
+	if (server->workspaces[0]) {
+		owl_workspace_set_state(server->workspaces[0], OWL_WORKSPACE_STATE_ACTIVE);
+		owl_workspace_commit(server->display);
+	}
 
 	g_server = server;
 
@@ -363,6 +504,10 @@ void server_run(Dwc_Server *server, const char *startup_cmd) {
 	if (startup_cmd) {
 		if (fork() == 0) {
 			setenv("WAYLAND_DISPLAY", owl_display_get_socket_name(server->display), 1);
+			setenv("XDG_SESSION_TYPE", "wayland", 1);
+			setenv("XDG_CURRENT_DESKTOP", "dwc", 1);
+			setenv("TERM", "xterm-256color", 1);
+			setenv("COLORTERM", "truecolor", 1);
 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (void *)NULL);
 			_exit(1);
 		}

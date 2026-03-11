@@ -2,8 +2,6 @@
 #include "internal.h"
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
 #include <time.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -21,17 +19,6 @@
 #define GL_UNPACK_ROW_LENGTH_EXT 0x0CF2
 #endif
 
-static FILE* render_log = NULL;
-static void render_debug(const char* fmt, ...) {
-    if (!render_log) render_log = fopen("/tmp/owl_render.log", "w");
-    if (render_log) {
-        va_list args;
-        va_start(args, fmt);
-        vfprintf(render_log, fmt, args);
-        va_end(args);
-        fflush(render_log);
-    }
-}
 
 static const char* vertex_shader_source =
     "attribute vec2 position;\n"
@@ -317,15 +304,12 @@ static void render_layer_surfaces(Owl_Display* display, Owl_Output* output, Owl_
 
 void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     if (!display || !output) {
-        render_debug("render_frame: null display or output\n");
         return;
     }
 
     if (output->page_flip_pending) {
-        render_debug("render_frame: page_flip_pending, skipping\n");
         return;
     }
-    render_debug("render_frame: starting\n");
 
     if (!eglMakeCurrent(display->egl_display, output->egl_surface,
                         output->egl_surface, display->egl_context)) {
@@ -334,7 +318,7 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     }
 
     glViewport(0, 0, output->width, output->height);
-    glClearColor(0.2f, 0.2f, 0.3f, 1.0f);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_BLEND);
@@ -346,24 +330,12 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     render_layer_surfaces(display, output, OWL_LAYER_BACKGROUND);
     render_layer_surfaces(display, output, OWL_LAYER_BOTTOM);
 
-    int window_count = 0;
-    int rendered_count = 0;
     Owl_Window* window;
     wl_list_for_each_reverse(window, &display->windows, link) {
-        window_count++;
-        render_debug("  window %p: mapped=%d surface=%p has_content=%d\n",
-                     (void*)window, window->mapped,
-                     (void*)window->surface,
-                     window->surface ? window->surface->has_content : 0);
         if (window->mapped && window->surface && window->surface->has_content) {
-            render_debug("    rendering at %d,%d size=%dx%d\n",
-                         window->pos_x, window->pos_y,
-                         window->surface->texture_width, window->surface->texture_height);
             owl_render_surface(display, window->surface, window->pos_x, window->pos_y);
-            rendered_count++;
         }
     }
-    render_debug("render_frame: windows=%d rendered=%d\n", window_count, rendered_count);
 
     render_layer_surfaces(display, output, OWL_LAYER_TOP);
     render_layer_surfaces(display, output, OWL_LAYER_OVERLAY);
@@ -372,7 +344,6 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
         int cursor_x = (int)display->pointer_x - display->cursor_hotspot_x;
         int cursor_y = (int)display->pointer_y - display->cursor_hotspot_y;
         owl_render_surface(display, display->cursor_surface, cursor_x, cursor_y);
-        render_debug("render_frame: cursor at %d,%d\n", cursor_x, cursor_y);
     }
 
     glDisable(GL_BLEND);

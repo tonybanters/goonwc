@@ -33,8 +33,10 @@ struct Dwc_Server {
 	Dwc_Toplevel *focused;
 	int toplevel_count;
 
-	unsigned int tagset;    
-	float mfact;            
+	unsigned int tagset;
+	float mfact;
+
+	Owl_Workspace *workspaces[9];
 
 	Dwc_Cursor_Mode cursor_mode;
 	Dwc_Toplevel *grabbed_toplevel;

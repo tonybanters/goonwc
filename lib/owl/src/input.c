@@ -111,11 +111,14 @@ static void handle_keyboard_key(Owl_Display* display, struct libinput_event_keyb
     Owl_Input_Event event_type = state == LIBINPUT_KEY_STATE_PRESSED
         ? OWL_INPUT_KEY_PRESS : OWL_INPUT_KEY_RELEASE;
 
-    owl_invoke_input_callback(display, event_type, &input);
+    bool handled = owl_invoke_input_callback(display, event_type, &input);
 
-    uint32_t wl_state = state == LIBINPUT_KEY_STATE_PRESSED
-        ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED;
-    owl_seat_send_key(display, keycode, wl_state);
+    /* only forward key to client if not consumed by compositor */
+    if (!handled) {
+        uint32_t wl_state = state == LIBINPUT_KEY_STATE_PRESSED
+            ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED;
+        owl_seat_send_key(display, keycode, wl_state);
+    }
     owl_seat_send_modifiers(display);
 }
 

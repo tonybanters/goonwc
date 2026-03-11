@@ -8,6 +8,8 @@
 #include <gbm.h>
 #include <EGL/egl.h>
 #include <wayland-server-protocol.h>
+#include "xdg-output-unstable-v1-protocol.h"
+#include "xdg-output-unstable-v1-protocol.c"
 
 static void wl_output_release(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
@@ -46,10 +48,78 @@ static void wl_output_bind(struct wl_client* client, void* data, uint32_t versio
         wl_output_send_scale(resource, 1);
     }
 
+    if (bound_version >= 4) {
+        wl_output_send_name(resource, output->name);
+        wl_output_send_description(resource, output->name);
+    }
+
     if (bound_version >= 2) {
         wl_output_send_done(resource);
     }
 }
+
+static void xdg_output_destroy(struct wl_client* client, struct wl_resource* resource) {
+    (void)client;
+    wl_resource_destroy(resource);
+}
+
+static const struct zxdg_output_v1_interface xdg_output_interface = {
+    .destroy = xdg_output_destroy,
+};
+
+static void xdg_output_manager_destroy(struct wl_client* client, struct wl_resource* resource) {
+    (void)client;
+    wl_resource_destroy(resource);
+}
+
+static void xdg_output_manager_get_xdg_output(struct wl_client* client,
+                                               struct wl_resource* resource,
+                                               uint32_t id,
+                                               struct wl_resource* output_resource) {
+    (void)wl_resource_get_user_data(resource);  /* display - unused */
+    Owl_Output* output = wl_resource_get_user_data(output_resource);
+
+    uint32_t version = wl_resource_get_version(resource);
+    struct wl_resource* xdg_output = wl_resource_create(client, &zxdg_output_v1_interface, version, id);
+    if (!xdg_output) {
+        wl_resource_post_no_memory(resource);
+        return;
+    }
+
+    wl_resource_set_implementation(xdg_output, &xdg_output_interface, output, NULL);
+
+    zxdg_output_v1_send_logical_position(xdg_output, output->pos_x, output->pos_y);
+    zxdg_output_v1_send_logical_size(xdg_output, output->width, output->height);
+
+    if (version >= 2) {
+        zxdg_output_v1_send_name(xdg_output, output->name);
+        zxdg_output_v1_send_description(xdg_output, output->name);
+    }
+
+    if (version < 3) {
+        zxdg_output_v1_send_done(xdg_output);
+    }
+}
+
+static const struct zxdg_output_manager_v1_interface xdg_output_manager_interface = {
+    .destroy = xdg_output_manager_destroy,
+    .get_xdg_output = xdg_output_manager_get_xdg_output,
+};
+
+static void xdg_output_manager_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
+    Owl_Display* display = data;
+    uint32_t bound_version = version < 3 ? version : 3;
+
+    struct wl_resource* resource = wl_resource_create(client, &zxdg_output_manager_v1_interface, bound_version, id);
+    if (!resource) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+
+    wl_resource_set_implementation(resource, &xdg_output_manager_interface, display, NULL);
+}
+
+static struct wl_global* xdg_output_manager_global = NULL;
 
 static Owl_Output* create_output(Owl_Display* display, drmModeConnector* connector,
                                   drmModeCrtc* crtc) {
@@ -151,6 +221,9 @@ static void destroy_output(Owl_Output* output) {
 }
 
 void owl_output_init(Owl_Display* display) {
+    xdg_output_manager_global = wl_global_create(display->wayland_display,
+        &zxdg_output_manager_v1_interface, 3, display, xdg_output_manager_bind);
+
     drmModeRes* resources = drmModeGetResources(display->drm_fd);
     if (!resources) {
         fprintf(stderr, "owl: failed to get DRM resources\n");
@@ -241,6 +314,11 @@ void owl_output_cleanup(Owl_Display* display) {
         display->outputs[index] = NULL;
     }
     display->output_count = 0;
+
+    if (xdg_output_manager_global) {
+        wl_global_destroy(xdg_output_manager_global);
+        xdg_output_manager_global = NULL;
+    }
 }
 
 Owl_Output** owl_get_outputs(Owl_Display* display, int* count) {

@@ -6,12 +6,14 @@ CFLAGS += $(shell pkg-config --cflags wayland-server xkbcommon libdrm gbm egl gl
 
 DWC_SRC = src/main.c src/server.c
 OWL_SRC = lib/owl/src/callbacks.c \
+          lib/owl/src/decoration.c \
           lib/owl/src/display.c \
           lib/owl/src/input.c \
           lib/owl/src/layer_shell.c \
           lib/owl/src/output.c \
           lib/owl/src/render.c \
           lib/owl/src/surface.c \
+          lib/owl/src/workspace.c \
           lib/owl/src/xdg_shell.c
 
 PROTOCOL_XML = lib/owl/protocols/xdg-shell.xml
@@ -22,6 +24,18 @@ LAYER_SHELL_XML = lib/owl/protocols/wlr-layer-shell-unstable-v1.xml
 LAYER_SHELL_H = build/wlr-layer-shell-unstable-v1-protocol.h
 LAYER_SHELL_C = build/wlr-layer-shell-unstable-v1-protocol.c
 
+XDG_OUTPUT_XML = lib/owl/protocols/xdg-output-unstable-v1.xml
+XDG_OUTPUT_H = build/xdg-output-unstable-v1-protocol.h
+XDG_OUTPUT_C = build/xdg-output-unstable-v1-protocol.c
+
+EXT_WORKSPACE_XML = lib/owl/protocols/ext-workspace-v1.xml
+EXT_WORKSPACE_H = build/ext-workspace-v1-protocol.h
+EXT_WORKSPACE_C = build/ext-workspace-v1-protocol.c
+
+XDG_DECORATION_XML = lib/owl/protocols/xdg-decoration-unstable-v1.xml
+XDG_DECORATION_H = build/xdg-decoration-protocol.h
+XDG_DECORATION_C = build/xdg-decoration-protocol.c
+
 ALL_SRC = $(DWC_SRC) $(OWL_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
@@ -31,7 +45,7 @@ TARGET = dwc
 
 all: $(TARGET)
 
-$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(OBJ)
+$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 build:
@@ -49,7 +63,25 @@ $(LAYER_SHELL_H): $(LAYER_SHELL_XML) | build
 $(LAYER_SHELL_C): $(LAYER_SHELL_XML) | build
 	wayland-scanner private-code $< $@
 
-%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C)
+$(XDG_OUTPUT_H): $(XDG_OUTPUT_XML) | build
+	wayland-scanner server-header $< $@
+
+$(XDG_OUTPUT_C): $(XDG_OUTPUT_XML) | build
+	wayland-scanner private-code $< $@
+
+$(EXT_WORKSPACE_H): $(EXT_WORKSPACE_XML) | build
+	wayland-scanner server-header $< $@
+
+$(EXT_WORKSPACE_C): $(EXT_WORKSPACE_XML) | build
+	wayland-scanner private-code $< $@
+
+$(XDG_DECORATION_H): $(XDG_DECORATION_XML) | build
+	wayland-scanner server-header $< $@
+
+$(XDG_DECORATION_C): $(XDG_DECORATION_XML) | build
+	wayland-scanner private-code $< $@
+
+%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

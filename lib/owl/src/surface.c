@@ -380,6 +380,12 @@ static void surface_commit(struct wl_client* client, struct wl_resource* resourc
     wl_list_insert_list(&surface->current.frame_callbacks, &surface->pending.frame_callbacks);
     wl_list_init(&surface->pending.frame_callbacks);
 
+    /* Send initial configure to layer surfaces after properties are set */
+    Owl_Layer_Surface* ls = find_layer_surface_for_surface(surface->display, surface);
+    if (ls) {
+        owl_layer_surface_send_initial_configure(ls);
+    }
+
     if (surface->current.buffer) {
         surf_debug("  uploading texture\n");
         owl_render_upload_texture(surface->display, surface);
@@ -942,6 +948,13 @@ void owl_window_set_fullscreen(Owl_Window* window, bool fullscreen) {
     }
     window->fullscreen = fullscreen;
     owl_invoke_window_callback(window->display, OWL_WINDOW_EVENT_FULLSCREEN, window);
+}
+
+void owl_window_set_tiled(Owl_Window* window, bool tiled) {
+    if (!window) {
+        return;
+    }
+    window->tiled = tiled;
 }
 
 int owl_window_get_x(Owl_Window* window) {
