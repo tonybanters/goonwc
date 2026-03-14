@@ -27,15 +27,15 @@ typedef struct {
 
 typedef struct {
 	const char **cmd;
-} Arg_Cmd;
+} arg_cmd;
 
 typedef struct {
 	unsigned int tag;
-} Arg_Tag;
+} arg_tag;
 
 typedef struct {
 	int i;
-} Arg_Int;
+} arg_int;
 
 /* function declarations for keybindings */
 void spawn(void *arg);
@@ -51,23 +51,23 @@ void togglefloating(void *arg);
 void zoom(void *arg);
 
 /* tag arguments */
-static Arg_Tag tag1 = { .tag = 1 << 0 };
-static Arg_Tag tag2 = { .tag = 1 << 1 };
-static Arg_Tag tag3 = { .tag = 1 << 2 };
-static Arg_Tag tag4 = { .tag = 1 << 3 };
-static Arg_Tag tag5 = { .tag = 1 << 4 };
-static Arg_Tag tag6 = { .tag = 1 << 5 };
-static Arg_Tag tag7 = { .tag = 1 << 6 };
-static Arg_Tag tag8 = { .tag = 1 << 7 };
-static Arg_Tag tag9 = { .tag = 1 << 8 };
+static arg_tag tag1 = { .tag = 1 << 0 };
+static arg_tag tag2 = { .tag = 1 << 1 };
+static arg_tag tag3 = { .tag = 1 << 2 };
+static arg_tag tag4 = { .tag = 1 << 3 };
+static arg_tag tag5 = { .tag = 1 << 4 };
+static arg_tag tag6 = { .tag = 1 << 5 };
+static arg_tag tag7 = { .tag = 1 << 6 };
+static arg_tag tag8 = { .tag = 1 << 7 };
+static arg_tag tag9 = { .tag = 1 << 8 };
 
 /* other arguments */
-static Arg_Cmd arg_term = { .cmd = termcmd };
-static Arg_Cmd arg_menu = { .cmd = menucmd };
-static Arg_Int arg_focusup   = { .i = -1 };
-static Arg_Int arg_focusdown = { .i = +1 };
-static Arg_Int arg_mfact_dec = { .i = -5 };  /* -5% */
-static Arg_Int arg_mfact_inc = { .i = +5 };  /* +5% */
+static arg_cmd arg_term = { .cmd = termcmd };
+static arg_cmd arg_menu = { .cmd = menucmd };
+static arg_int arg_focusup   = { .i = -1 };
+static arg_int arg_focusdown = { .i = +1 };
+static arg_int arg_mfact_dec = { .i = -5 };  /* -5% */
+static arg_int arg_mfact_inc = { .i = +5 };  /* +5% */
 
 static Key keys[] = {
 	/* modifier    key         function        argument */

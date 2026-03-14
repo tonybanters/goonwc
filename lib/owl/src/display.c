@@ -79,7 +79,7 @@ static int open_drm_device(void) {
     return -1;
 }
 
-static bool init_gbm(Owl_Display* display) {
+static bool init_gbm(owl_display* display) {
     display->gbm_device = gbm_create_device(display->drm_fd);
     if (!display->gbm_device) {
         fprintf(stderr, "owl: failed to create GBM device\n");
@@ -90,7 +90,7 @@ static bool init_gbm(Owl_Display* display) {
 
 static PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display_ext = NULL;
 
-static bool init_egl(Owl_Display* display) {
+static bool init_egl(owl_display* display) {
     get_platform_display_ext = (PFNEGLGETPLATFORMDISPLAYEXTPROC)
         eglGetProcAddress("eglGetPlatformDisplayEXT");
 
@@ -156,7 +156,7 @@ static void page_flip_handler(int fd, unsigned int sequence, unsigned int tv_sec
     (void)sequence;
     (void)tv_sec;
     (void)tv_usec;
-    Owl_Output* output = user_data;
+    owl_output* output = user_data;
     disp_debug("page_flip_handler: output=%p\n", (void*)output);
     if (output) {
         output->page_flip_pending = false;
@@ -187,14 +187,13 @@ static int handle_drm_event(int fd, uint32_t mask, void* data) {
     return 0;
 }
 
-Owl_Display* owl_display_create(void) {
-    Owl_Display* display = calloc(1, sizeof(Owl_Display));
+owl_display* owl_display_create(void) {
+    owl_display* display = calloc(1, sizeof(owl_display));
     if (!display) {
         return NULL;
     }
 
     wl_list_init(&display->windows);
-    wl_list_init(&display->layer_surfaces);
 
     display->wayland_display = wl_display_create();
     if (!display->wayland_display) {
@@ -258,7 +257,7 @@ Owl_Display* owl_display_create(void) {
     return display;
 }
 
-void owl_display_destroy(Owl_Display* display) {
+void owl_display_destroy(owl_display* display) {
     if (!display) {
         return;
     }
@@ -301,7 +300,7 @@ void owl_display_destroy(Owl_Display* display) {
     free(display);
 }
 
-void owl_display_run(Owl_Display* display) {
+void owl_display_run(owl_display* display) {
     if (!display) {
         return;
     }
@@ -318,7 +317,7 @@ void owl_display_run(Owl_Display* display) {
     }
 }
 
-void owl_display_terminate(Owl_Display* display) {
+void owl_display_terminate(owl_display* display) {
     if (!display) {
         return;
     }
@@ -326,17 +325,11 @@ void owl_display_terminate(Owl_Display* display) {
     display->running = false;
 }
 
-const char* owl_display_get_socket_name(Owl_Display* display) {
-    if (!display) {
-        return NULL;
-    }
-    return display->socket_name;
+const char* owl_display_get_socket(owl_display* display) {
+    return display ? display->socket_name : NULL;
 }
 
-int owl_display_get_pointer_x(Owl_Display* display) {
-    return display ? (int)display->pointer_x : 0;
-}
-
-int owl_display_get_pointer_y(Owl_Display* display) {
-    return display ? (int)display->pointer_y : 0;
+void owl_display_get_pointer(owl_display* display, int* x, int* y) {
+    if (x) *x = display ? (int)display->pointer_x : 0;
+    if (y) *y = display ? (int)display->pointer_y : 0;
 }

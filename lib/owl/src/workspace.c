@@ -9,9 +9,9 @@
 
 typedef struct {
     struct wl_resource* resource;
-    Owl_Workspace* workspace;
+    owl_workspace* workspace;
     struct wl_list link;
-} Workspace_Resource;
+} workspace_resource;
 
 static void workspace_handle_destroy(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
@@ -20,7 +20,7 @@ static void workspace_handle_destroy(struct wl_client* client, struct wl_resourc
 
 static void workspace_handle_activate(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
-    Workspace_Resource* ws_res = wl_resource_get_user_data(resource);
+    workspace_resource* ws_res = wl_resource_get_user_data(resource);
     if (ws_res && ws_res->workspace && ws_res->workspace->display) {
         owl_invoke_workspace_callback(ws_res->workspace->display, OWL_WORKSPACE_EVENT_ACTIVATE, ws_res->workspace);
     }
@@ -28,7 +28,7 @@ static void workspace_handle_activate(struct wl_client* client, struct wl_resour
 
 static void workspace_handle_deactivate(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
-    Workspace_Resource* ws_res = wl_resource_get_user_data(resource);
+    workspace_resource* ws_res = wl_resource_get_user_data(resource);
     if (ws_res && ws_res->workspace && ws_res->workspace->display) {
         owl_invoke_workspace_callback(ws_res->workspace->display, OWL_WORKSPACE_EVENT_DEACTIVATE, ws_res->workspace);
     }
@@ -43,7 +43,7 @@ static void workspace_handle_assign(struct wl_client* client, struct wl_resource
 
 static void workspace_handle_remove(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
-    Workspace_Resource* ws_res = wl_resource_get_user_data(resource);
+    workspace_resource* ws_res = wl_resource_get_user_data(resource);
     if (ws_res && ws_res->workspace && ws_res->workspace->display) {
         owl_invoke_workspace_callback(ws_res->workspace->display, OWL_WORKSPACE_EVENT_REMOVE, ws_res->workspace);
     }
@@ -58,7 +58,7 @@ static const struct ext_workspace_handle_v1_interface workspace_interface = {
 };
 
 static void workspace_resource_destroy(struct wl_resource* resource) {
-    Workspace_Resource* ws_resource = wl_resource_get_user_data(resource);
+    workspace_resource* ws_resource = wl_resource_get_user_data(resource);
     if (ws_resource) {
         wl_list_remove(&ws_resource->link);
         free(ws_resource);
@@ -84,7 +84,7 @@ static const struct ext_workspace_group_handle_v1_interface workspace_group_inte
 };
 
 static void workspace_group_resource_destroy(struct wl_resource* resource) {
-    Workspace_Resource* ws_resource = wl_resource_get_user_data(resource);
+    workspace_resource* ws_resource = wl_resource_get_user_data(resource);
     if (ws_resource) {
         wl_list_remove(&ws_resource->link);
         free(ws_resource);
@@ -107,14 +107,14 @@ static const struct ext_workspace_manager_v1_interface manager_interface = {
 };
 
 static void manager_resource_destroy(struct wl_resource* resource) {
-    Workspace_Resource* ws_resource = wl_resource_get_user_data(resource);
+    workspace_resource* ws_resource = wl_resource_get_user_data(resource);
     if (ws_resource) {
         wl_list_remove(&ws_resource->link);
         free(ws_resource);
     }
 }
 
-static void send_workspace_to_client(Owl_Display* display, Owl_Workspace* workspace,
+static void send_workspace_to_client(owl_display* display, owl_workspace* workspace,
                                       struct wl_resource* manager_resource,
                                       struct wl_resource* group_resource) {
     struct wl_client* client = wl_resource_get_client(manager_resource);
@@ -126,7 +126,7 @@ static void send_workspace_to_client(Owl_Display* display, Owl_Workspace* worksp
         return;
     }
 
-    Workspace_Resource* ws_res = calloc(1, sizeof(Workspace_Resource));
+    workspace_resource* ws_res = calloc(1, sizeof(workspace_resource));
     if (!ws_res) {
         wl_resource_destroy(ws_resource);
         return;
@@ -165,7 +165,7 @@ static void send_workspace_to_client(Owl_Display* display, Owl_Workspace* worksp
 
 static void workspace_manager_bind(struct wl_client* client, void* data,
                                     uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
     uint32_t bound_version = version < 1 ? version : 1;
 
     struct wl_resource* resource = wl_resource_create(client,
@@ -175,7 +175,7 @@ static void workspace_manager_bind(struct wl_client* client, void* data,
         return;
     }
 
-    Workspace_Resource* ws_resource = calloc(1, sizeof(Workspace_Resource));
+    workspace_resource* ws_resource = calloc(1, sizeof(workspace_resource));
     if (!ws_resource) {
         wl_resource_destroy(resource);
         wl_client_post_no_memory(client);
@@ -194,7 +194,7 @@ static void workspace_manager_bind(struct wl_client* client, void* data,
         return;
     }
 
-    Workspace_Resource* group_res = calloc(1, sizeof(Workspace_Resource));
+    workspace_resource* group_res = calloc(1, sizeof(workspace_resource));
     if (!group_res) {
         wl_resource_destroy(group_resource);
         return;
@@ -211,7 +211,7 @@ static void workspace_manager_bind(struct wl_client* client, void* data,
     uint32_t group_capabilities = 0;
     ext_workspace_group_handle_v1_send_capabilities(group_resource, group_capabilities);
 
-    Owl_Workspace* workspace;
+    owl_workspace* workspace;
     wl_list_for_each(workspace, &display->workspaces, link) {
         send_workspace_to_client(display, workspace, resource, group_resource);
     }
@@ -219,7 +219,7 @@ static void workspace_manager_bind(struct wl_client* client, void* data,
     ext_workspace_manager_v1_send_done(resource);
 }
 
-void owl_workspace_init(Owl_Display* display) {
+void owl_workspace_init(owl_display* display) {
     wl_list_init(&display->workspaces);
     wl_list_init(&display->workspace_manager_resources);
     wl_list_init(&display->workspace_group_resources);
@@ -237,9 +237,9 @@ void owl_workspace_init(Owl_Display* display) {
     }
 }
 
-void owl_workspace_cleanup(Owl_Display* display) {
-    Owl_Workspace* workspace;
-    Owl_Workspace* tmp;
+void owl_workspace_cleanup(owl_display* display) {
+    owl_workspace* workspace;
+    owl_workspace* tmp;
     wl_list_for_each_safe(workspace, tmp, &display->workspaces, link) {
         wl_list_remove(&workspace->link);
         free(workspace->name);
@@ -253,8 +253,8 @@ void owl_workspace_cleanup(Owl_Display* display) {
     }
 }
 
-Owl_Workspace* owl_workspace_create(Owl_Display* display, const char* name) {
-    Owl_Workspace* workspace = calloc(1, sizeof(Owl_Workspace));
+owl_workspace* owl_workspace_create(owl_display* display, const char* name) {
+    owl_workspace* workspace = calloc(1, sizeof(owl_workspace));
     if (!workspace) {
         return NULL;
     }
@@ -268,9 +268,9 @@ Owl_Workspace* owl_workspace_create(Owl_Display* display, const char* name) {
     wl_list_insert(&display->workspaces, &workspace->link);
     display->workspace_count++;
 
-    Workspace_Resource* mgr_res;
+    workspace_resource* mgr_res;
     wl_list_for_each(mgr_res, &display->workspace_manager_resources, link) {
-        Workspace_Resource* grp_res;
+        workspace_resource* grp_res;
         wl_list_for_each(grp_res, &display->workspace_group_resources, link) {
             if (wl_resource_get_client(mgr_res->resource) ==
                 wl_resource_get_client(grp_res->resource)) {
@@ -285,18 +285,18 @@ Owl_Workspace* owl_workspace_create(Owl_Display* display, const char* name) {
     return workspace;
 }
 
-void owl_workspace_destroy(Owl_Workspace* workspace) {
+void owl_workspace_destroy(owl_workspace* workspace) {
     if (!workspace) {
         return;
     }
 
-    Workspace_Resource* ws_res;
-    Workspace_Resource* tmp;
+    workspace_resource* ws_res;
+    workspace_resource* tmp;
     wl_list_for_each_safe(ws_res, tmp, &workspace->resources, link) {
         ext_workspace_handle_v1_send_removed(ws_res->resource);
     }
 
-    Workspace_Resource* mgr_res;
+    workspace_resource* mgr_res;
     wl_list_for_each(mgr_res, &workspace->display->workspace_manager_resources, link) {
         ext_workspace_manager_v1_send_done(mgr_res->resource);
     }
@@ -314,27 +314,27 @@ void owl_workspace_destroy(Owl_Workspace* workspace) {
     free(workspace);
 }
 
-void owl_workspace_set_state(Owl_Workspace* workspace, uint32_t state) {
+void owl_workspace_set_state(owl_workspace* workspace, uint32_t state) {
     if (!workspace || workspace->state == state) {
         return;
     }
 
     workspace->state = state;
 
-    Workspace_Resource* ws_res;
+    workspace_resource* ws_res;
     wl_list_for_each(ws_res, &workspace->resources, link) {
         ext_workspace_handle_v1_send_state(ws_res->resource, state);
     }
 }
 
-void owl_workspace_set_coordinates(Owl_Workspace* workspace, int32_t x) {
+void owl_workspace_set_coordinates(owl_workspace* workspace, int32_t x) {
     if (!workspace) {
         return;
     }
 
     workspace->coordinate = x;
 
-    Workspace_Resource* ws_res;
+    workspace_resource* ws_res;
     wl_list_for_each(ws_res, &workspace->resources, link) {
         struct wl_array coords;
         wl_array_init(&coords);
@@ -347,27 +347,19 @@ void owl_workspace_set_coordinates(Owl_Workspace* workspace, int32_t x) {
     }
 }
 
-void owl_workspace_commit(Owl_Display* display) {
+void owl_workspace_commit(owl_display* display) {
     if (!display) {
         return;
     }
 
-    Workspace_Resource* mgr_res;
+    workspace_resource* mgr_res;
     wl_list_for_each(mgr_res, &display->workspace_manager_resources, link) {
         ext_workspace_manager_v1_send_done(mgr_res->resource);
     }
 }
 
-const char* owl_workspace_get_name(Owl_Workspace* workspace) {
-    return workspace ? workspace->name : NULL;
-}
-
-uint32_t owl_workspace_get_state(Owl_Workspace* workspace) {
-    return workspace ? workspace->state : 0;
-}
-
-void owl_set_workspace_callback(Owl_Display* display, Owl_Workspace_Event type,
-                                 Owl_Workspace_Callback callback, void* data) {
+void owl_set_workspace_callback(owl_display* display, owl_workspace_event type,
+                                 owl_workspace_callback callback, void* data) {
     if (!display || type < 0 || type >= 3) {
         return;
     }
@@ -382,15 +374,15 @@ void owl_set_workspace_callback(Owl_Display* display, Owl_Workspace_Event type,
     display->workspace_callback_count[type]++;
 }
 
-void owl_invoke_workspace_callback(Owl_Display* display, Owl_Workspace_Event type,
-                                    Owl_Workspace* workspace) {
+void owl_invoke_workspace_callback(owl_display* display, owl_workspace_event type,
+                                    owl_workspace* workspace) {
     if (!display || type < 0 || type >= 3) {
         return;
     }
 
     int count = display->workspace_callback_count[type];
     for (int i = 0; i < count; i++) {
-        Workspace_Callback_Entry* entry = &display->workspace_callbacks[type][i];
+        workspace_callback_entry* entry = &display->workspace_callbacks[type][i];
         if (entry->callback) {
             entry->callback(display, workspace, entry->data);
         }

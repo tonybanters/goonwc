@@ -21,7 +21,7 @@ static const struct wl_output_interface output_interface = {
 };
 
 static void wl_output_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    Owl_Output* output = data;
+    owl_output* output = data;
     uint32_t bound_version = version < 4 ? version : 4;
 
     struct wl_resource* resource = wl_resource_create(client, &wl_output_interface, bound_version, id);
@@ -33,7 +33,7 @@ static void wl_output_bind(struct wl_client* client, void* data, uint32_t versio
     wl_resource_set_implementation(resource, &output_interface, output, NULL);
 
     wl_output_send_geometry(resource,
-        output->pos_x, output->pos_y,
+        output->x, output->y,
         0, 0,
         WL_OUTPUT_SUBPIXEL_UNKNOWN,
         "owl", output->name,
@@ -42,7 +42,7 @@ static void wl_output_bind(struct wl_client* client, void* data, uint32_t versio
     wl_output_send_mode(resource,
         WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
         output->width, output->height,
-        output->drm_mode.vrefresh * 1000);
+        ((drmModeModeInfo*)output->drm_mode)->vrefresh * 1000);
 
     if (bound_version >= 2) {
         wl_output_send_scale(resource, 1);
@@ -77,7 +77,7 @@ static void xdg_output_manager_get_xdg_output(struct wl_client* client,
                                                uint32_t id,
                                                struct wl_resource* output_resource) {
     (void)wl_resource_get_user_data(resource);  /* display - unused */
-    Owl_Output* output = wl_resource_get_user_data(output_resource);
+    owl_output* output = wl_resource_get_user_data(output_resource);
 
     uint32_t version = wl_resource_get_version(resource);
     struct wl_resource* xdg_output = wl_resource_create(client, &zxdg_output_v1_interface, version, id);
@@ -88,7 +88,7 @@ static void xdg_output_manager_get_xdg_output(struct wl_client* client,
 
     wl_resource_set_implementation(xdg_output, &xdg_output_interface, output, NULL);
 
-    zxdg_output_v1_send_logical_position(xdg_output, output->pos_x, output->pos_y);
+    zxdg_output_v1_send_logical_position(xdg_output, output->x, output->y);
     zxdg_output_v1_send_logical_size(xdg_output, output->width, output->height);
 
     if (version >= 2) {
@@ -107,7 +107,7 @@ static const struct zxdg_output_manager_v1_interface xdg_output_manager_interfac
 };
 
 static void xdg_output_manager_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
     uint32_t bound_version = version < 3 ? version : 3;
 
     struct wl_resource* resource = wl_resource_create(client, &zxdg_output_manager_v1_interface, bound_version, id);
@@ -121,9 +121,9 @@ static void xdg_output_manager_bind(struct wl_client* client, void* data, uint32
 
 static struct wl_global* xdg_output_manager_global = NULL;
 
-static Owl_Output* create_output(Owl_Display* display, drmModeConnector* connector,
+static owl_output* create_output(owl_display* display, drmModeConnector* connector,
                                   drmModeCrtc* crtc) {
-    Owl_Output* output = calloc(1, sizeof(Owl_Output));
+    owl_output* output = calloc(1, sizeof(owl_output));
     if (!output) {
         return NULL;
     }
@@ -131,11 +131,11 @@ static Owl_Output* create_output(Owl_Display* display, drmModeConnector* connect
     output->display = display;
     output->drm_connector_id = connector->connector_id;
     output->drm_crtc_id = crtc->crtc_id;
-    output->drm_mode = connector->modes[0];
-    output->width = output->drm_mode.hdisplay;
-    output->height = output->drm_mode.vdisplay;
-    output->pos_x = crtc->x;
-    output->pos_y = crtc->y;
+    memcpy(output->drm_mode, &connector->modes[0], sizeof(drmModeModeInfo));
+    output->width = ((drmModeModeInfo*)output->drm_mode)->hdisplay;
+    output->height = ((drmModeModeInfo*)output->drm_mode)->vdisplay;
+    output->x = crtc->x;
+    output->y = crtc->y;
 
     const char* connector_types[] = {
         "Unknown", "VGA", "DVII", "DVID", "DVIA", "Composite", "SVIDEO",
@@ -195,7 +195,7 @@ static Owl_Output* create_output(Owl_Display* display, drmModeConnector* connect
     return output;
 }
 
-static void destroy_output(Owl_Output* output) {
+static void destroy_output(owl_output* output) {
     if (!output) {
         return;
     }
@@ -220,7 +220,7 @@ static void destroy_output(Owl_Output* output) {
     free(output);
 }
 
-void owl_output_init(Owl_Display* display) {
+void owl_output_init(owl_display* display) {
     xdg_output_manager_global = wl_global_create(display->wayland_display,
         &zxdg_output_manager_v1_interface, 3, display, xdg_output_manager_bind);
 
@@ -292,7 +292,7 @@ void owl_output_init(Owl_Display* display) {
         }
 
         if (display->output_count < OWL_MAX_OUTPUTS) {
-            Owl_Output* output = create_output(display, connector, crtc);
+            owl_output* output = create_output(display, connector, crtc);
             if (output) {
                 display->outputs[display->output_count++] = output;
                 owl_invoke_output_callback(display, OWL_OUTPUT_EVENT_CONNECT, output);
@@ -307,7 +307,7 @@ void owl_output_init(Owl_Display* display) {
     drmModeFreeResources(resources);
 }
 
-void owl_output_cleanup(Owl_Display* display) {
+void owl_output_cleanup(owl_display* display) {
     for (int index = 0; index < display->output_count; index++) {
         owl_invoke_output_callback(display, OWL_OUTPUT_EVENT_DISCONNECT, display->outputs[index]);
         destroy_output(display->outputs[index]);
@@ -321,7 +321,7 @@ void owl_output_cleanup(Owl_Display* display) {
     }
 }
 
-Owl_Output** owl_get_outputs(Owl_Display* display, int* count) {
+owl_output** owl_display_get_outputs(owl_display* display, int* count) {
     if (!display || !count) {
         if (count) *count = 0;
         return NULL;
@@ -330,22 +330,3 @@ Owl_Output** owl_get_outputs(Owl_Display* display, int* count) {
     return display->outputs;
 }
 
-int owl_output_get_x(Owl_Output* output) {
-    return output ? output->pos_x : 0;
-}
-
-int owl_output_get_y(Owl_Output* output) {
-    return output ? output->pos_y : 0;
-}
-
-int owl_output_get_width(Owl_Output* output) {
-    return output ? output->width : 0;
-}
-
-int owl_output_get_height(Owl_Output* output) {
-    return output ? output->height : 0;
-}
-
-const char* owl_output_get_name(Owl_Output* output) {
-    return output ? output->name : NULL;
-}

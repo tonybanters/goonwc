@@ -16,7 +16,7 @@ static void layer_surface_set_size(
         uint32_t height
     ) {
     (void)client;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->width = width;
     surface->height = height;
@@ -28,7 +28,7 @@ static void layer_surface_set_anchor(
         uint32_t anchor
     ) {
     (void)client;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->anchor = anchor;
 }
@@ -39,7 +39,7 @@ static void layer_surface_set_exclusive_zone(
         int32_t zone
     ) {
     (void)client;
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    owl_layer_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->exclusive_zone = zone;
 }
@@ -53,7 +53,7 @@ static void layer_surface_set_margin(
         int32_t left
     ) {
     (void)client;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->margin_top = top;
     surface->margin_right = right;
@@ -67,7 +67,7 @@ static void layer_surface_set_keyboard_interactivity(
         uint32_t keyboard_interactivity
     ) {
     (void)client;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->keyboard_interactivity = keyboard_interactivity;
 }
@@ -89,7 +89,7 @@ static void layer_surface_ack_configure(
     ) {
     (void)client;
     (void)serial;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
 }
 
@@ -104,7 +104,7 @@ static void layer_surface_set_layer(
         uint32_t layer
     ) {
     (void)client;
-    Owl_Layer_Surface *surface = wl_resource_get_user_data(resource);
+    owl_layer_surface *surface = wl_resource_get_user_data(resource);
     if (!surface) return;
     surface->layer = layer;
 }
@@ -133,7 +133,7 @@ static const struct zwlr_layer_surface_v1_interface layer_surface_interface = {
 };
 
 static void layer_surface_destroy_handler(struct wl_resource* resource) {
-    Owl_Layer_Surface* surface = wl_resource_get_user_data(resource);
+    owl_layer_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) return;
 
     if (surface->mapped) {
@@ -143,8 +143,16 @@ static void layer_surface_destroy_handler(struct wl_resource* resource) {
 
     owl_invoke_layer_surface_callback(surface->display, OWL_LAYER_SURFACE_EVENT_DESTROY, surface);
 
-    wl_list_remove(&surface->link);
-    surface->display->layer_surface_count--;
+    owl_display *display = surface->display;
+    for (int i = 0; i < display->layer_surface_count; i++) {
+        if (display->layer_surfaces[i] == surface) {
+            for (int j = i; j < display->layer_surface_count - 1; j++) {
+                display->layer_surfaces[j] = display->layer_surfaces[j + 1];
+            }
+            display->layer_surface_count--;
+            break;
+        }
+    }
 
     free(surface->namespace);
     free(surface);
@@ -159,10 +167,10 @@ static void layer_surface_destroy_handler(struct wl_resource* resource) {
  * Calculates the appropriate size for a layer surface based on its anchor
  * points and the output dimensions, then sends a configure event to the client.
  */
-static void owl_layer_surface_send_configure(Owl_Layer_Surface* ls, uint32_t width, uint32_t height) {
+static void owl_layer_surface_send_configure(owl_layer_surface* ls, uint32_t width, uint32_t height) {
     if (!ls || !ls->layer_surface_resource) return;
 
-    Owl_Output* output = ls->output;
+    owl_output* output = ls->output;
     if (!output && ls->display->output_count > 0) {
         output = ls->display->outputs[0];
     }
@@ -198,8 +206,8 @@ static void layer_shell_get_layer_surface(
         uint32_t layer,
         const char *namespace
     ) {
-    Owl_Display *display = wl_resource_get_user_data(resource);
-    Owl_Surface *wl_surface = owl_surface_from_resource(surface_resource);
+    owl_display *display = wl_resource_get_user_data(resource);
+    owl_surface *wl_surface = owl_surface_from_resource(surface_resource);
 
     if (!wl_surface) {
         wl_resource_post_error(resource, ZWLR_LAYER_SHELL_V1_ERROR_ROLE, "surface is null");
@@ -211,7 +219,7 @@ static void layer_shell_get_layer_surface(
         return;
     }
 
-    Owl_Layer_Surface *ls = calloc(1, sizeof(Owl_Layer_Surface));
+    owl_layer_surface *ls = calloc(1, sizeof(owl_layer_surface));
     if (!ls) {
         wl_resource_post_no_memory(resource);
         return;
@@ -247,8 +255,9 @@ static void layer_shell_get_layer_surface(
 
     wl_resource_set_implementation(ls->layer_surface_resource, &layer_surface_interface, ls, layer_surface_destroy_handler);
 
-    wl_list_insert(&display->layer_surfaces, &ls->link);
-    display->layer_surface_count++;
+    if (display->layer_surface_count < OWL_MAX_LAYER_SURFACES) {
+        display->layer_surfaces[display->layer_surface_count++] = ls;
+    }
 
     owl_invoke_layer_surface_callback(display, OWL_LAYER_SURFACE_EVENT_CREATE, ls);
 
@@ -269,7 +278,7 @@ static const struct zwlr_layer_shell_v1_interface layer_shell_interface = {
 };
 
 static void layer_shell_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
 
     uint32_t bound_version = version < 4 ? version : 4;
     struct wl_resource* resource = wl_resource_create(client, &zwlr_layer_shell_v1_interface, bound_version, id);
@@ -281,7 +290,7 @@ static void layer_shell_bind(struct wl_client *client, void *data, uint32_t vers
     wl_resource_set_implementation(resource, &layer_shell_interface, display, NULL);
 }
 
-void owl_layer_shell_init(Owl_Display *display) {
+void owl_layer_shell_init(owl_display *display) {
     display->layer_shell_global = wl_global_create(
         display->wayland_display,
         &zwlr_layer_shell_v1_interface,
@@ -298,86 +307,25 @@ void owl_layer_shell_init(Owl_Display *display) {
     fprintf(stderr, "owl: layer-shell initialized\n");
 }
 
-void owl_layer_shell_cleanup(Owl_Display *display) {
+void owl_layer_shell_cleanup(owl_display *display) {
     if (display->layer_shell_global) {
         wl_global_destroy(display->layer_shell_global);
         display->layer_shell_global = NULL;
     }
 }
 
-void owl_layer_surface_send_initial_configure(Owl_Layer_Surface *layer_surface) {
+void owl_layer_surface_send_initial_configure(owl_layer_surface *layer_surface) {
     if (!layer_surface || layer_surface->initial_configure_sent) return;
     layer_surface->initial_configure_sent = true;
     owl_layer_surface_send_configure(layer_surface, layer_surface->width, layer_surface->height);
 }
 
-Owl_Layer_Surface **owl_get_layer_surfaces(Owl_Display *display, int *count) {
+owl_layer_surface **owl_display_get_layer_surfaces(owl_display *display, int *count) {
     if (!display || !count) {
+        if (count) *count = 0;
         return NULL;
     }
-
     *count = display->layer_surface_count;
-    if (*count == 0) {
-        return NULL;
-    }
-
-    Owl_Layer_Surface **surfaces = calloc(*count, sizeof(Owl_Layer_Surface*));
-    if (!surfaces) return NULL;
-
-    int i = 0;
-    Owl_Layer_Surface *ls;
-    wl_list_for_each(ls, &display->layer_surfaces, link) {
-        surfaces[i++] = ls;
-        if (i >= *count) break;
-    }
-
-    return surfaces;
+    return display->layer_surfaces;
 }
 
-Owl_Layer owl_layer_surface_get_layer(Owl_Layer_Surface *surface) {
-    return surface ? surface->layer : OWL_LAYER_BACKGROUND;
-}
-
-uint32_t owl_layer_surface_get_anchor(Owl_Layer_Surface *surface) {
-    return surface ? surface->anchor : 0;
-}
-
-int owl_layer_surface_get_exclusive_zone(Owl_Layer_Surface *surface) {
-    return surface ? surface->exclusive_zone : 0;
-} 
-
-int owl_layer_surface_get_margin_top(Owl_Layer_Surface *surface) {
-    return surface ? surface->margin_top : 0;
-}
-
-int owl_layer_surface_get_margin_right(Owl_Layer_Surface *surface) {
-    return surface ? surface->margin_right : 0;
-}
-
-int owl_layer_surface_get_margin_bottom(Owl_Layer_Surface *surface) {
-    return surface ? surface->margin_bottom : 0;
-}
-
-int owl_layer_surface_get_margin_left(Owl_Layer_Surface *surface) {
-    return surface ? surface->margin_left : 0;
-}
-
-Owl_Keyboard_Interactivity owl_layer_surface_get_keyboard_interactivity(Owl_Layer_Surface *surface) {
-    return surface ? surface->keyboard_interactivity : OWL_KEYBOARD_INTERACTIVITY_NONE;
-}
-
-int owl_layer_surface_get_width(Owl_Layer_Surface *surface) {
-    return surface ? surface->configured_width : 0;
-}
-
-int owl_layer_surface_get_height(Owl_Layer_Surface *surface) {
-    return surface ? surface->configured_height : 0;
-}
-
-const char* owl_layer_surface_get_namespace(Owl_Layer_Surface *surface) {
-    return surface ? surface->namespace : NULL;
-}
-
-bool owl_layer_surface_is_mapped(Owl_Layer_Surface *surface) {
-    return surface ? surface->mapped : false;
-}

@@ -8,8 +8,8 @@
 #include "xdg-shell-protocol.h"
 #include "xdg-shell-protocol.c"
 
-static FILE* owl_log = NULL;
-static void owl_debug(const char* fmt, ...) {
+static FILE *owl_log = NULL;
+static void owl_debug(const char *fmt, ...) {
     if (!owl_log) owl_log = fopen("/tmp/owl_debug.log", "w");
     if (owl_log) {
         va_list args;
@@ -25,17 +25,23 @@ static void xdg_toplevel_destroy(struct wl_client* client, struct wl_resource* r
     wl_resource_destroy(resource);
 }
 
-static void xdg_toplevel_set_parent(struct wl_client* client, struct wl_resource* resource,
-                                    struct wl_resource* parent) {
+static void xdg_toplevel_set_parent(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        struct wl_resource *parent
+    ) {
     (void)client;
     (void)resource;
     (void)parent;
 }
 
-static void xdg_toplevel_set_title(struct wl_client* client, struct wl_resource* resource,
-                                   const char* title) {
+static void xdg_toplevel_set_title(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        const char *title
+    ) {
     (void)client;
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -46,10 +52,13 @@ static void xdg_toplevel_set_title(struct wl_client* client, struct wl_resource*
     owl_invoke_window_callback(window->display, OWL_WINDOW_EVENT_TITLE_CHANGE, window);
 }
 
-static void xdg_toplevel_set_app_id(struct wl_client* client, struct wl_resource* resource,
-                                    const char* app_id) {
+static void xdg_toplevel_set_app_id(
+        struct wl_client *client,
+        struct wl_resource *resource,
+        const char *app_id
+    ) {
     (void)client;
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window *window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -117,7 +126,7 @@ static void xdg_toplevel_set_fullscreen(struct wl_client* client, struct wl_reso
     (void)client;
     (void)output;
 
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -129,7 +138,7 @@ static void xdg_toplevel_set_fullscreen(struct wl_client* client, struct wl_reso
 static void xdg_toplevel_unset_fullscreen(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
 
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -161,7 +170,7 @@ static const struct xdg_toplevel_interface toplevel_interface = {
 };
 
 static void xdg_toplevel_destroy_handler(struct wl_resource* resource) {
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -169,7 +178,7 @@ static void xdg_toplevel_destroy_handler(struct wl_resource* resource) {
     window->xdg_toplevel_resource = NULL;
 }
 
-static void send_toplevel_configure(Owl_Window* window) {
+static void send_toplevel_configure(owl_window* window) {
     struct wl_array states;
     wl_array_init(&states);
 
@@ -209,7 +218,7 @@ static void xdg_surface_destroy(struct wl_client* client, struct wl_resource* re
 static void xdg_surface_get_toplevel(struct wl_client* client, struct wl_resource* resource,
                                      uint32_t id) {
     owl_debug("xdg_surface_get_toplevel called\n");
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         owl_debug("  window is NULL!\n");
         return;
@@ -287,7 +296,7 @@ static void xdg_surface_set_window_geometry(struct wl_client* client, struct wl_
                                             int32_t x, int32_t y, int32_t width, int32_t height) {
     (void)client;
 
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -306,7 +315,7 @@ static void xdg_surface_ack_configure(struct wl_client* client, struct wl_resour
                                       uint32_t serial) {
     (void)client;
 
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -325,7 +334,7 @@ static const struct xdg_surface_interface surface_interface = {
 };
 
 static void xdg_surface_destroy_handler(struct wl_resource* resource) {
-    Owl_Window* window = wl_resource_get_user_data(resource);
+    owl_window* window = wl_resource_get_user_data(resource);
     if (!window) {
         return;
     }
@@ -449,8 +458,8 @@ static void xdg_wm_base_create_positioner(struct wl_client* client, struct wl_re
 static void xdg_wm_base_get_xdg_surface(struct wl_client* client, struct wl_resource* resource,
                                         uint32_t id, struct wl_resource* surface_resource) {
     owl_debug("xdg_wm_base_get_xdg_surface called\n");
-    Owl_Display* display = wl_resource_get_user_data(resource);
-    Owl_Surface* surface = owl_surface_from_resource(surface_resource);
+    owl_display* display = wl_resource_get_user_data(resource);
+    owl_surface* surface = owl_surface_from_resource(surface_resource);
 
     if (!surface) {
         owl_debug("  surface is NULL!\n");
@@ -459,7 +468,7 @@ static void xdg_wm_base_get_xdg_surface(struct wl_client* client, struct wl_reso
         return;
     }
 
-    Owl_Window* window = calloc(1, sizeof(Owl_Window));
+    owl_window* window = calloc(1, sizeof(owl_window));
     if (!window) {
         owl_debug("  failed to alloc window\n");
         wl_resource_post_no_memory(resource);
@@ -506,7 +515,7 @@ static const struct xdg_wm_base_interface wm_base_interface = {
 };
 
 static void wm_base_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
 
     uint32_t bound_version = version < 3 ? version : 3;
     struct wl_resource* resource = wl_resource_create(client, &xdg_wm_base_interface, bound_version, id);
@@ -520,7 +529,7 @@ static void wm_base_bind(struct wl_client* client, void* data, uint32_t version,
 
 static struct wl_global* xdg_wm_base_global = NULL;
 
-void owl_xdg_shell_init(Owl_Display* display) {
+void owl_xdg_shell_init(owl_display* display) {
     xdg_wm_base_global = wl_global_create(display->wayland_display,
         &xdg_wm_base_interface, 3, display, wm_base_bind);
 
@@ -532,7 +541,7 @@ void owl_xdg_shell_init(Owl_Display* display) {
     fprintf(stderr, "owl: xdg-shell initialized\n");
 }
 
-void owl_xdg_shell_cleanup(Owl_Display* display) {
+void owl_xdg_shell_cleanup(owl_display* display) {
     (void)display;
 
     if (xdg_wm_base_global) {
@@ -541,7 +550,7 @@ void owl_xdg_shell_cleanup(Owl_Display* display) {
     }
 }
 
-void owl_xdg_toplevel_send_configure(Owl_Window* window, int width, int height) {
+void owl_xdg_toplevel_send_configure(owl_window* window, int width, int height) {
     if (!window || !window->xdg_toplevel_resource || !window->xdg_surface_resource) {
         return;
     }
@@ -558,7 +567,7 @@ void owl_xdg_toplevel_send_configure(Owl_Window* window, int width, int height) 
     xdg_surface_send_configure(window->xdg_surface_resource, serial++);
 }
 
-void owl_xdg_toplevel_send_close(Owl_Window* window) {
+void owl_xdg_toplevel_send_close(owl_window* window) {
     if (!window || !window->xdg_toplevel_resource) {
         return;
     }
@@ -566,7 +575,7 @@ void owl_xdg_toplevel_send_close(Owl_Window* window) {
     xdg_toplevel_send_close(window->xdg_toplevel_resource);
 }
 
-void owl_window_map(Owl_Window* window) {
+void owl_window_map(owl_window* window) {
     if (!window || window->mapped) {
         return;
     }

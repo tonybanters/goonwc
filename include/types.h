@@ -9,37 +9,41 @@ typedef enum {
 	DWC_CURSOR_PASSTHROUGH,
 	DWC_CURSOR_MOVE,
 	DWC_CURSOR_RESIZE,
-} Dwc_Cursor_Mode;
+} dwc_cursor_mode;
 
-typedef struct Dwc_Toplevel Dwc_Toplevel;
-typedef struct Dwc_Server Dwc_Server;
+typedef struct {
+	int x, y, w, h;
+} rect;
 
-struct Dwc_Toplevel {
-	Dwc_Server *server;
-	Owl_Window *window;
+typedef struct dwc_toplevel dwc_toplevel;
+typedef struct dwc_server dwc_server;
+
+struct dwc_toplevel {
+	dwc_server *server;
+	owl_window *window;
 	int pos_x;
 	int pos_y;
 	unsigned int tags;      
 	bool is_floating;       
 	bool is_fullscreen;
-	Dwc_Toplevel *next;
-	Dwc_Toplevel *prev;
+	dwc_toplevel *next;
+	dwc_toplevel *prev;
 };
 
-struct Dwc_Server {
-	Owl_Display *display;
+struct dwc_server {
+	owl_display *display;
 
-	Dwc_Toplevel *toplevels;
-	Dwc_Toplevel *focused;
+	dwc_toplevel *toplevels;
+	dwc_toplevel *focused;
 	int toplevel_count;
 
 	unsigned int tagset;
 	float mfact;
 
-	Owl_Workspace *workspaces[9];
+	owl_workspace *workspaces[9];
 
-	Dwc_Cursor_Mode cursor_mode;
-	Dwc_Toplevel *grabbed_toplevel;
+	dwc_cursor_mode cursor_mode;
+	dwc_toplevel *grabbed_toplevel;
 	double grab_x, grab_y;
 	int grab_width, grab_height;
 	int grab_pos_x, grab_pos_y;

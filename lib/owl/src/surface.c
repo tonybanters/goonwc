@@ -22,7 +22,7 @@ static void surf_debug(const char* fmt, ...) {
 }
 
 static void shm_pool_destroy_handler(struct wl_resource* resource) {
-    Owl_Shm_Pool* pool = wl_resource_get_user_data(resource);
+    owl_shm_pool* pool = wl_resource_get_user_data(resource);
     if (!pool) {
         return;
     }
@@ -40,7 +40,7 @@ static void shm_pool_destroy_handler(struct wl_resource* resource) {
 }
 
 static void shm_buffer_destroy_handler(struct wl_resource* resource) {
-    Owl_Shm_Buffer* buffer = wl_resource_get_user_data(resource);
+    owl_shm_buffer* buffer = wl_resource_get_user_data(resource);
     if (!buffer) {
         return;
     }
@@ -73,7 +73,7 @@ static const struct wl_buffer_interface buffer_interface = {
 static void shm_pool_create_buffer(struct wl_client* client, struct wl_resource* resource,
                                    uint32_t id, int32_t offset, int32_t width, int32_t height,
                                    int32_t stride, uint32_t format) {
-    Owl_Shm_Pool* pool = wl_resource_get_user_data(resource);
+    owl_shm_pool* pool = wl_resource_get_user_data(resource);
     if (!pool) {
         wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FD, "invalid pool");
         return;
@@ -94,7 +94,7 @@ static void shm_pool_create_buffer(struct wl_client* client, struct wl_resource*
         return;
     }
 
-    Owl_Shm_Buffer* buffer = calloc(1, sizeof(Owl_Shm_Buffer));
+    owl_shm_buffer* buffer = calloc(1, sizeof(owl_shm_buffer));
     if (!buffer) {
         wl_resource_post_no_memory(resource);
         return;
@@ -123,7 +123,7 @@ static void shm_pool_create_buffer(struct wl_client* client, struct wl_resource*
 
 static void shm_pool_destroy(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
-    Owl_Shm_Pool* pool = wl_resource_get_user_data(resource);
+    owl_shm_pool* pool = wl_resource_get_user_data(resource);
     if (pool) {
         pool->resource = NULL;
     }
@@ -132,7 +132,7 @@ static void shm_pool_destroy(struct wl_client* client, struct wl_resource* resou
 
 static void shm_pool_resize(struct wl_client* client, struct wl_resource* resource, int32_t size) {
     (void)client;
-    Owl_Shm_Pool* pool = wl_resource_get_user_data(resource);
+    owl_shm_pool* pool = wl_resource_get_user_data(resource);
     if (!pool) {
         return;
     }
@@ -160,7 +160,7 @@ static const struct wl_shm_pool_interface shm_pool_interface = {
 
 static void shm_create_pool(struct wl_client* client, struct wl_resource* resource,
                             uint32_t id, int32_t fd, int32_t size) {
-    Owl_Display* display = wl_resource_get_user_data(resource);
+    owl_display* display = wl_resource_get_user_data(resource);
 
     if (size <= 0) {
         close(fd);
@@ -168,7 +168,7 @@ static void shm_create_pool(struct wl_client* client, struct wl_resource* resour
         return;
     }
 
-    Owl_Shm_Pool* pool = calloc(1, sizeof(Owl_Shm_Pool));
+    owl_shm_pool* pool = calloc(1, sizeof(owl_shm_pool));
     if (!pool) {
         close(fd);
         wl_resource_post_no_memory(resource);
@@ -205,7 +205,7 @@ static const struct wl_shm_interface shm_interface = {
 };
 
 static void shm_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
     (void)version;
 
     struct wl_resource* resource = wl_resource_create(client, &wl_shm_interface, 1, id);
@@ -220,14 +220,14 @@ static void shm_bind(struct wl_client* client, void* data, uint32_t version, uin
     wl_shm_send_format(resource, WL_SHM_FORMAT_XRGB8888);
 }
 
-static void surface_state_init(Owl_Surface_State* state) {
-    memset(state, 0, sizeof(Owl_Surface_State));
+static void surface_state_init(owl_surface_state* state) {
+    memset(state, 0, sizeof(owl_surface_state));
     wl_list_init(&state->frame_callbacks);
 }
 
-static void surface_state_cleanup(Owl_Surface_State* state) {
-    Owl_Frame_Callback* callback;
-    Owl_Frame_Callback* tmp;
+static void surface_state_cleanup(owl_surface_state* state) {
+    owl_frame_callback* callback;
+    owl_frame_callback* tmp;
     wl_list_for_each_safe(callback, tmp, &state->frame_callbacks, link) {
         wl_list_remove(&callback->link);
         free(callback);
@@ -235,7 +235,7 @@ static void surface_state_cleanup(Owl_Surface_State* state) {
 }
 
 static void surface_destroy_handler(struct wl_resource* resource) {
-    Owl_Surface* surface = wl_resource_get_user_data(resource);
+    owl_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) {
         return;
     }
@@ -267,7 +267,7 @@ static void surface_destroy(struct wl_client* client, struct wl_resource* resour
 static void surface_attach(struct wl_client* client, struct wl_resource* resource,
                            struct wl_resource* buffer_resource, int32_t x, int32_t y) {
     (void)client;
-    Owl_Surface* surface = wl_resource_get_user_data(resource);
+    owl_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) {
         return;
     }
@@ -281,7 +281,7 @@ static void surface_attach(struct wl_client* client, struct wl_resource* resourc
 static void surface_damage(struct wl_client* client, struct wl_resource* resource,
                            int32_t x, int32_t y, int32_t width, int32_t height) {
     (void)client;
-    Owl_Surface* surface = wl_resource_get_user_data(resource);
+    owl_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) {
         return;
     }
@@ -294,12 +294,12 @@ static void surface_damage(struct wl_client* client, struct wl_resource* resourc
 }
 
 static void surface_frame(struct wl_client* client, struct wl_resource* resource, uint32_t callback_id) {
-    Owl_Surface* surface = wl_resource_get_user_data(resource);
+    owl_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) {
         return;
     }
 
-    Owl_Frame_Callback* callback = calloc(1, sizeof(Owl_Frame_Callback));
+    owl_frame_callback* callback = calloc(1, sizeof(owl_frame_callback));
     if (!callback) {
         wl_resource_post_no_memory(resource);
         return;
@@ -330,8 +330,8 @@ static void surface_set_input_region(struct wl_client* client, struct wl_resourc
     (void)region;
 }
 
-static Owl_Window* find_window_for_surface(Owl_Display* display, Owl_Surface* surface) {
-    Owl_Window* window;
+static owl_window* find_window_for_surface(owl_display* display, owl_surface* surface) {
+    owl_window* window;
     wl_list_for_each(window, &display->windows, link) {
         if (window->surface == surface) {
             return window;
@@ -340,9 +340,9 @@ static Owl_Window* find_window_for_surface(Owl_Display* display, Owl_Surface* su
     return NULL;
 }
 
-static Owl_Layer_Surface* find_layer_surface_for_surface(Owl_Display* display, Owl_Surface* surface) {
-    Owl_Layer_Surface* ls;
-    wl_list_for_each(ls, &display->layer_surfaces, link) {
+static owl_layer_surface* find_layer_surface_for_surface(owl_display* display, owl_surface* surface) {
+    for (int i = 0; i < display->layer_surface_count; i++) {
+        owl_layer_surface* ls = display->layer_surfaces[i];
         if (ls->surface == surface) {
             return ls;
         }
@@ -353,7 +353,7 @@ static Owl_Layer_Surface* find_layer_surface_for_surface(Owl_Display* display, O
 static void surface_commit(struct wl_client* client, struct wl_resource* resource) {
     (void)client;
     surf_debug("surface_commit called\n");
-    Owl_Surface* surface = wl_resource_get_user_data(resource);
+    owl_surface* surface = wl_resource_get_user_data(resource);
     if (!surface) {
         surf_debug("  surface is NULL\n");
         return;
@@ -381,7 +381,7 @@ static void surface_commit(struct wl_client* client, struct wl_resource* resourc
     wl_list_init(&surface->pending.frame_callbacks);
 
     /* Send initial configure to layer surfaces after properties are set */
-    Owl_Layer_Surface* ls = find_layer_surface_for_surface(surface->display, surface);
+    owl_layer_surface* ls = find_layer_surface_for_surface(surface->display, surface);
     if (ls) {
         owl_layer_surface_send_initial_configure(ls);
     }
@@ -392,7 +392,7 @@ static void surface_commit(struct wl_client* client, struct wl_resource* resourc
         surf_debug("  texture uploaded\n");
         surface->has_content = true;
 
-        Owl_Window* window = find_window_for_surface(surface->display, surface);
+        owl_window* window = find_window_for_surface(surface->display, surface);
         surf_debug("  window=%p\n", (void*)window);
         if (window && window->xdg_toplevel_resource && !window->mapped) {
             surf_debug("  mapping window\n");
@@ -404,7 +404,7 @@ static void surface_commit(struct wl_client* client, struct wl_resource* resourc
             surf_debug("  window mapped\n");
         }
 
-        Owl_Layer_Surface* layer_surface = find_layer_surface_for_surface(surface->display, surface);
+        owl_layer_surface* layer_surface = find_layer_surface_for_surface(surface->display, surface);
         surf_debug("  layer_surface=%p\n", (void*)layer_surface);
         if (layer_surface && !layer_surface->mapped) {
             surf_debug("  mapping layer surface\n");
@@ -470,9 +470,9 @@ static const struct wl_surface_interface surface_interface = {
 
 static void compositor_create_surface(struct wl_client* client, struct wl_resource* resource,
                                       uint32_t id) {
-    Owl_Display* display = wl_resource_get_user_data(resource);
+    owl_display* display = wl_resource_get_user_data(resource);
 
-    Owl_Surface* surface = calloc(1, sizeof(Owl_Surface));
+    owl_surface* surface = calloc(1, sizeof(owl_surface));
     if (!surface) {
         wl_resource_post_no_memory(resource);
         return;
@@ -550,7 +550,7 @@ static const struct wl_compositor_interface compositor_interface = {
 };
 
 static void compositor_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    Owl_Display* display = data;
+    owl_display* display = data;
 
     uint32_t bound_version = version < 6 ? version : 6;
     struct wl_resource* resource = wl_resource_create(client, &wl_compositor_interface, bound_version, id);
@@ -783,7 +783,7 @@ static void data_device_manager_bind(struct wl_client* client, void* data,
     wl_resource_set_implementation(resource, &data_device_manager_interface, NULL, NULL);
 }
 
-void owl_surface_init(Owl_Display* display) {
+void owl_surface_init(owl_display* display) {
     wl_list_init(&display->surfaces);
 
     display->compositor_global = wl_global_create(display->wayland_display,
@@ -821,9 +821,9 @@ void owl_surface_init(Owl_Display* display) {
     fprintf(stderr, "owl: surface protocol initialized\n");
 }
 
-void owl_surface_cleanup(Owl_Display* display) {
-    Owl_Surface* surface;
-    Owl_Surface* tmp;
+void owl_surface_cleanup(owl_display* display) {
+    owl_surface* surface;
+    owl_surface* tmp;
     wl_list_for_each_safe(surface, tmp, &display->surfaces, link) {
         wl_resource_destroy(surface->resource);
     }
@@ -849,18 +849,18 @@ void owl_surface_cleanup(Owl_Display* display) {
     }
 }
 
-Owl_Surface* owl_surface_from_resource(struct wl_resource* resource) {
+owl_surface* owl_surface_from_resource(struct wl_resource* resource) {
     if (!resource) {
         return NULL;
     }
     return wl_resource_get_user_data(resource);
 }
 
-void owl_surface_send_frame_done(Owl_Display* display, uint32_t time) {
-    Owl_Surface* surface;
+void owl_surface_send_frame_done(owl_display* display, uint32_t time) {
+    owl_surface* surface;
     wl_list_for_each(surface, &display->surfaces, link) {
-        Owl_Frame_Callback* callback;
-        Owl_Frame_Callback* tmp;
+        owl_frame_callback* callback;
+        owl_frame_callback* tmp;
         wl_list_for_each_safe(callback, tmp, &surface->current.frame_callbacks, link) {
             wl_callback_send_done(callback->resource, time);
             wl_resource_destroy(callback->resource);
@@ -870,7 +870,7 @@ void owl_surface_send_frame_done(Owl_Display* display, uint32_t time) {
     }
 }
 
-Owl_Window** owl_get_windows(Owl_Display* display, int* count) {
+owl_window** owl_display_get_windows(owl_display* display, int* count) {
     if (!display || !count) {
         if (count) *count = 0;
         return NULL;
@@ -881,10 +881,10 @@ Owl_Window** owl_get_windows(Owl_Display* display, int* count) {
         return NULL;
     }
 
-    static Owl_Window* window_array[OWL_MAX_WINDOWS];
+    static owl_window* window_array[OWL_MAX_WINDOWS];
     int index = 0;
 
-    Owl_Window* window;
+    owl_window* window;
     wl_list_for_each(window, &display->windows, link) {
         if (index < OWL_MAX_WINDOWS && window->mapped) {
             window_array[index++] = window;
@@ -895,12 +895,12 @@ Owl_Window** owl_get_windows(Owl_Display* display, int* count) {
     return window_array;
 }
 
-void owl_window_focus(Owl_Window* window) {
+void owl_window_focus(owl_window* window) {
     if (!window) {
         return;
     }
 
-    Owl_Window* other;
+    owl_window* other;
     wl_list_for_each(other, &window->display->windows, link) {
         if (other->focused && other != window) {
             other->focused = false;
@@ -918,31 +918,29 @@ void owl_window_focus(Owl_Window* window) {
     }
 }
 
-void owl_window_move(Owl_Window* window, int x, int y) {
+void owl_window_move(owl_window* window, int new_x, int new_y) {
     if (!window) {
         return;
     }
-    window->pos_x = x;
-    window->pos_y = y;
-    owl_invoke_window_callback(window->display, OWL_WINDOW_EVENT_MOVE, window);
+    window->x = new_x;
+    window->y = new_y;
 }
 
-void owl_window_resize(Owl_Window* window, int width, int height) {
+void owl_window_resize(owl_window* window, int width, int height) {
     if (!window) {
         return;
     }
     owl_xdg_toplevel_send_configure(window, width, height);
-    owl_invoke_window_callback(window->display, OWL_WINDOW_EVENT_RESIZE, window);
 }
 
-void owl_window_close(Owl_Window* window) {
+void owl_window_close(owl_window* window) {
     if (!window) {
         return;
     }
     owl_xdg_toplevel_send_close(window);
 }
 
-void owl_window_set_fullscreen(Owl_Window* window, bool fullscreen) {
+void owl_window_set_fullscreen(owl_window* window, bool fullscreen) {
     if (!window) {
         return;
     }
@@ -950,41 +948,10 @@ void owl_window_set_fullscreen(Owl_Window* window, bool fullscreen) {
     owl_invoke_window_callback(window->display, OWL_WINDOW_EVENT_FULLSCREEN, window);
 }
 
-void owl_window_set_tiled(Owl_Window* window, bool tiled) {
+void owl_window_set_tiled(owl_window* window, bool tiled) {
     if (!window) {
         return;
     }
     window->tiled = tiled;
 }
 
-int owl_window_get_x(Owl_Window* window) {
-    return window ? window->pos_x : 0;
-}
-
-int owl_window_get_y(Owl_Window* window) {
-    return window ? window->pos_y : 0;
-}
-
-int owl_window_get_width(Owl_Window* window) {
-    return window ? window->width : 0;
-}
-
-int owl_window_get_height(Owl_Window* window) {
-    return window ? window->height : 0;
-}
-
-const char* owl_window_get_title(Owl_Window* window) {
-    return window ? window->title : NULL;
-}
-
-const char* owl_window_get_app_id(Owl_Window* window) {
-    return window ? window->app_id : NULL;
-}
-
-bool owl_window_is_fullscreen(Owl_Window* window) {
-    return window ? window->fullscreen : false;
-}
-
-bool owl_window_is_focused(Owl_Window* window) {
-    return window ? window->focused : false;
-}

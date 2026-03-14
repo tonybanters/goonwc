@@ -125,7 +125,7 @@ static bool init_shaders(void) {
     return true;
 }
 
-static uint32_t get_framebuffer_for_bo(Owl_Display* display, struct gbm_bo* bo) {
+static uint32_t get_framebuffer_for_bo(owl_display* display, struct gbm_bo* bo) {
     uint32_t* fb_id_ptr = gbm_bo_get_user_data(bo);
     if (fb_id_ptr) {
         return *fb_id_ptr;
@@ -159,7 +159,7 @@ static uint32_t get_time_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-void owl_render_init(Owl_Display* display) {
+void owl_render_init(owl_display* display) {
     if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context)) {
         fprintf(stderr, "owl: failed to make EGL context current for init\n");
         return;
@@ -170,7 +170,7 @@ void owl_render_init(Owl_Display* display) {
     }
 }
 
-void owl_render_cleanup(Owl_Display* display) {
+void owl_render_cleanup(owl_display* display) {
     (void)display;
 
     if (quad_vbo) {
@@ -184,13 +184,13 @@ void owl_render_cleanup(Owl_Display* display) {
     }
 }
 
-uint32_t owl_render_upload_texture(Owl_Display* display, Owl_Surface* surface) {
+uint32_t owl_render_upload_texture(owl_display* display, owl_surface* surface) {
     if (!surface || !surface->current.buffer) {
         return 0;
     }
 
-    Owl_Shm_Buffer* buffer = surface->current.buffer;
-    Owl_Shm_Pool* pool = buffer->pool;
+    owl_shm_buffer* buffer = surface->current.buffer;
+    owl_shm_pool* pool = buffer->pool;
 
     if (!pool || !pool->data) {
         return 0;
@@ -227,7 +227,7 @@ uint32_t owl_render_upload_texture(Owl_Display* display, Owl_Surface* surface) {
     return surface->texture_id;
 }
 
-void owl_render_surface(Owl_Display* display, Owl_Surface* surface, int x, int y) {
+void owl_render_surface(owl_display* display, owl_surface* surface, int x, int y) {
     (void)display;
 
     if (!surface || surface->texture_id == 0) {
@@ -267,7 +267,7 @@ void owl_render_surface(Owl_Display* display, Owl_Surface* surface, int x, int y
  * Calculates the position of a layer surface based on its anchor points,
  * margins, and the configured size.
  */
-static void owl_layer_surface_get_position(Owl_Layer_Surface* ls, Owl_Output* output, int* x, int* y) {
+static void owl_layer_surface_get_position(owl_layer_surface* ls, owl_output* output, int* x, int* y) {
     int out_w = output->width;
     int out_h = output->height;
     int surf_w = ls->configured_width;
@@ -290,9 +290,9 @@ static void owl_layer_surface_get_position(Owl_Layer_Surface* ls, Owl_Output* ou
     }
 }
 
-static void render_layer_surfaces(Owl_Display* display, Owl_Output* output, Owl_Layer layer) {
-    Owl_Layer_Surface* ls;
-    wl_list_for_each(ls, &display->layer_surfaces, link) {
+static void render_layer_surfaces(owl_display* display, owl_output* output, owl_layer layer) {
+    for (int i = 0; i < display->layer_surface_count; i++) {
+        owl_layer_surface* ls = display->layer_surfaces[i];
         if (ls->layer != layer || !ls->mapped || !ls->surface || !ls->surface->has_content) {
             continue;
         }
@@ -302,7 +302,7 @@ static void render_layer_surfaces(Owl_Display* display, Owl_Output* output, Owl_
     }
 }
 
-void owl_render_frame(Owl_Display* display, Owl_Output* output) {
+void owl_render_frame(owl_display* display, owl_output* output) {
     if (!display || !output) {
         return;
     }
@@ -330,10 +330,10 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
     render_layer_surfaces(display, output, OWL_LAYER_BACKGROUND);
     render_layer_surfaces(display, output, OWL_LAYER_BOTTOM);
 
-    Owl_Window* window;
+    owl_window* window;
     wl_list_for_each_reverse(window, &display->windows, link) {
         if (window->mapped && window->surface && window->surface->has_content) {
-            owl_render_surface(display, window->surface, window->pos_x, window->pos_y);
+            owl_render_surface(display, window->surface, window->x, window->y);
         }
     }
 
@@ -367,7 +367,7 @@ void owl_render_frame(Owl_Display* display, Owl_Output* output) {
 
     if (!output->current_bo) {
         int result = drmModeSetCrtc(display->drm_fd, output->drm_crtc_id, fb_id,
-                                    0, 0, &output->drm_connector_id, 1, &output->drm_mode);
+                                    0, 0, &output->drm_connector_id, 1, (drmModeModeInfoPtr)output->drm_mode);
         if (result) {
             fprintf(stderr, "owl: failed to set CRTC: %d\n", result);
             gbm_surface_release_buffer(output->gbm_surface, bo);

@@ -10,8 +10,7 @@ static void decoration_destroy(struct wl_client* client, struct wl_resource* res
     wl_resource_destroy(resource);
 }
 
-static void decoration_set_mode(struct wl_client* client, struct wl_resource* resource,
-                                 uint32_t mode) {
+static void decoration_set_mode(struct wl_client* client, struct wl_resource* resource, uint32_t mode) {
     (void)client;
     (void)mode;
     zxdg_toplevel_decoration_v1_send_configure(resource,
@@ -75,7 +74,7 @@ static void manager_bind(struct wl_client* client, void* data, uint32_t version,
 
 static struct wl_global* decoration_global = NULL;
 
-void owl_decoration_init(Owl_Display* display) {
+void owl_decoration_init(owl_display* display) {
     decoration_global = wl_global_create(display->wayland_display,
         &zxdg_decoration_manager_v1_interface, 1, display, manager_bind);
 
@@ -87,7 +86,7 @@ void owl_decoration_init(Owl_Display* display) {
     fprintf(stderr, "owl: xdg-decoration initialized\n");
 }
 
-void owl_decoration_cleanup(Owl_Display* display) {
+void owl_decoration_cleanup(owl_display* display) {
     (void)display;
 
     if (decoration_global) {

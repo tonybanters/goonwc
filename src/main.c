@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	Dwc_Server server = {0};
+	dwc_server server = {0};
 	if (!server_init(&server)) {
 		return 1;
 	}

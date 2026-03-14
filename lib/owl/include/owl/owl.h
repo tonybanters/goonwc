@@ -3,163 +3,248 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <wayland-server-core.h>
 
-typedef struct Owl_Display Owl_Display;
-typedef struct Owl_Window Owl_Window;
-typedef struct Owl_Output Owl_Output;
-typedef struct Owl_Input Owl_Input;
-typedef struct Owl_Layer_Surface Owl_Layer_Surface;
-typedef struct Owl_Workspace Owl_Workspace;
+/* Forward declarations for internal types */
+struct wl_resource;
+struct wl_global;
+struct wl_display;
+struct wl_event_loop;
+struct gbm_surface;
+struct gbm_bo;
+struct gbm_device;
+struct libinput;
+struct udev;
+struct xkb_context;
+struct xkb_keymap;
+struct xkb_state;
+struct wl_event_source;
+
+/* Enums */
+typedef enum {
+	OWL_LAYER_BACKGROUND = 0,
+	OWL_LAYER_BOTTOM = 1,
+	OWL_LAYER_TOP = 2,
+	OWL_LAYER_OVERLAY = 3,
+} owl_layer;
 
 typedef enum {
-    OWL_LAYER_BACKGROUND = 0,
-    OWL_LAYER_BOTTOM = 1,
-    OWL_LAYER_TOP = 2,
-    OWL_LAYER_OVERLAY = 3,
-} Owl_Layer;
+	OWL_ANCHOR_TOP = 1,
+	OWL_ANCHOR_BOTTOM = 2,
+	OWL_ANCHOR_LEFT = 4,
+	OWL_ANCHOR_RIGHT = 8,
+	OWL_ANCHOR_TOP_EDGE = OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT,
+	OWL_ANCHOR_BOTTOM_EDGE = OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT,
+	OWL_ANCHOR_LEFT_EDGE = OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM,
+	OWL_ANCHOR_RIGHT_EDGE = OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM,
+} owl_anchor;
 
 typedef enum {
-    OWL_ANCHOR_TOP = 1,
-    OWL_ANCHOR_BOTTOM = 2,
-    OWL_ANCHOR_LEFT = 4,
-    OWL_ANCHOR_RIGHT = 8,
-    OWL_ANCHOR_TOP_EDGE = OWL_ANCHOR_TOP | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT,
-    OWL_ANCHOR_BOTTOM_EDGE = OWL_ANCHOR_BOTTOM | OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT,
-    OWL_ANCHOR_LEFT_EDGE = OWL_ANCHOR_LEFT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM,
-    OWL_ANCHOR_RIGHT_EDGE = OWL_ANCHOR_RIGHT | OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM,
-} Owl_Anchor;
+	OWL_KEYBOARD_INTERACTIVITY_NONE = 0,
+	OWL_KEYBOARD_INTERACTIVITY_EXCLUSIVE = 1,
+	OWL_KEYBOARD_INTERACTIVITY_ON_DEMAND = 2,
+} owl_keyboard_interactivity;
 
 typedef enum {
-    OWL_KEYBOARD_INTERACTIVITY_NONE = 0,
-    OWL_KEYBOARD_INTERACTIVITY_EXCLUSIVE = 1,
-    OWL_KEYBOARD_INTERACTIVITY_ON_DEMAND = 2,
-} Owl_Keyboard_Interactivity;
+	OWL_MOD_SHIFT = 1,
+	OWL_MOD_CTRL = 2,
+	OWL_MOD_ALT = 4,
+	OWL_MOD_SUPER = 8,
+} owl_modifier;
 
 typedef enum {
-    OWL_WINDOW_EVENT_CREATE,
-    OWL_WINDOW_EVENT_DESTROY,
-    OWL_WINDOW_EVENT_MAP,
-    OWL_WINDOW_EVENT_UNMAP,
-    OWL_WINDOW_EVENT_FOCUS,
-    OWL_WINDOW_EVENT_UNFOCUS,
-    OWL_WINDOW_EVENT_MOVE,
-    OWL_WINDOW_EVENT_RESIZE,
-    OWL_WINDOW_EVENT_FULLSCREEN,
-    OWL_WINDOW_EVENT_TITLE_CHANGE,
-    OWL_WINDOW_EVENT_REQUEST_MOVE,
-    OWL_WINDOW_EVENT_REQUEST_RESIZE,
-} Owl_Window_Event;
+	OWL_WINDOW_EVENT_CREATE,
+	OWL_WINDOW_EVENT_DESTROY,
+	OWL_WINDOW_EVENT_MAP,
+	OWL_WINDOW_EVENT_UNMAP,
+	OWL_WINDOW_EVENT_FOCUS,
+	OWL_WINDOW_EVENT_UNFOCUS,
+	OWL_WINDOW_EVENT_FULLSCREEN,
+	OWL_WINDOW_EVENT_TITLE_CHANGE,
+	OWL_WINDOW_EVENT_REQUEST_MOVE,
+	OWL_WINDOW_EVENT_REQUEST_RESIZE,
+} owl_window_event;
 
 typedef enum {
-    OWL_INPUT_KEY_PRESS,
-    OWL_INPUT_KEY_RELEASE,
-    OWL_INPUT_BUTTON_PRESS,
-    OWL_INPUT_BUTTON_RELEASE,
-    OWL_INPUT_POINTER_MOTION,
-} Owl_Input_Event;
+	OWL_INPUT_EVENT_KEY_PRESS,
+	OWL_INPUT_EVENT_KEY_RELEASE,
+	OWL_INPUT_EVENT_BUTTON_PRESS,
+	OWL_INPUT_EVENT_BUTTON_RELEASE,
+	OWL_INPUT_EVENT_POINTER_MOTION,
+} owl_input_event;
 
 typedef enum {
-    OWL_OUTPUT_EVENT_CONNECT,
-    OWL_OUTPUT_EVENT_DISCONNECT,
-    OWL_OUTPUT_EVENT_MODE_CHANGE,
-} Owl_Output_Event;
+	OWL_OUTPUT_EVENT_CONNECT,
+	OWL_OUTPUT_EVENT_DISCONNECT,
+	OWL_OUTPUT_EVENT_MODE_CHANGE,
+} owl_output_event;
 
 typedef enum {
-    OWL_LAYER_SURFACE_EVENT_CREATE,
-    OWL_LAYER_SURFACE_EVENT_DESTROY,
-    OWL_LAYER_SURFACE_EVENT_MAP,
-    OWL_LAYER_SURFACE_EVENT_UNMAP,
-} Owl_Layer_Surface_Event;
+	OWL_LAYER_SURFACE_EVENT_CREATE,
+	OWL_LAYER_SURFACE_EVENT_DESTROY,
+	OWL_LAYER_SURFACE_EVENT_MAP,
+	OWL_LAYER_SURFACE_EVENT_UNMAP,
+} owl_layer_surface_event;
 
 typedef enum {
-    OWL_WORKSPACE_STATE_ACTIVE = 1,
-    OWL_WORKSPACE_STATE_URGENT = 2,
-    OWL_WORKSPACE_STATE_HIDDEN = 4,
-} Owl_Workspace_State;
+	OWL_WORKSPACE_STATE_ACTIVE = 1,
+	OWL_WORKSPACE_STATE_URGENT = 2,
+	OWL_WORKSPACE_STATE_HIDDEN = 4,
+} owl_workspace_state;
 
 typedef enum {
-    OWL_WORKSPACE_EVENT_ACTIVATE,
-    OWL_WORKSPACE_EVENT_DEACTIVATE,
-    OWL_WORKSPACE_EVENT_REMOVE,
-} Owl_Workspace_Event;
+	OWL_WORKSPACE_EVENT_ACTIVATE,
+	OWL_WORKSPACE_EVENT_DEACTIVATE,
+	OWL_WORKSPACE_EVENT_REMOVE,
+} owl_workspace_event;
 
-typedef void (*Owl_Workspace_Callback)(Owl_Display* display, Owl_Workspace* workspace, void* data);
+/* Internal types - forward declared */
+typedef struct owl_surface owl_surface;
+typedef struct owl_shm_pool owl_shm_pool;
+typedef struct owl_shm_buffer owl_shm_buffer;
+typedef struct owl_display owl_display;
 
-typedef void (*Owl_Window_Callback)(Owl_Display* display, Owl_Window* window, void* data);
-typedef bool (*Owl_Input_Callback)(Owl_Display* display, Owl_Input* input, void* data);
-typedef void (*Owl_Output_Callback)(Owl_Display* display, Owl_Output* output, void* data);
-typedef void (*Owl_Layer_Surface_Callback)(Owl_Display* display, Owl_Layer_Surface* surface, void* data);
+/* Input event data - all fields public */
+typedef struct owl_input {
+	uint32_t keycode;
+	uint32_t keysym;
+	uint32_t modifiers;
+	uint32_t button;
+	int pointer_x;
+	int pointer_y;
+} owl_input;
 
-Owl_Display* owl_display_create(void);
-void owl_display_destroy(Owl_Display* display);
-void owl_display_run(Owl_Display* display);
-void owl_display_terminate(Owl_Display* display);
-const char* owl_display_get_socket_name(Owl_Display* display);
-int owl_display_get_pointer_x(Owl_Display* display);
-int owl_display_get_pointer_y(Owl_Display* display);
+/* output - public fields first, then internal */
+typedef struct owl_output {
+	/* Public - read these directly */
+	int x;
+	int y;
+	int width;
+	int height;
+	char *name;
 
-Owl_Window** owl_get_windows(Owl_Display* display, int* count);
-void owl_window_focus(Owl_Window* window);
-void owl_window_move(Owl_Window* window, int x, int y);
-void owl_window_resize(Owl_Window* window, int width, int height);
-void owl_window_close(Owl_Window* window);
-void owl_window_set_fullscreen(Owl_Window* window, bool fullscreen);
-void owl_window_set_tiled(Owl_Window* window, bool tiled);
+	/* Internal - don't touch */
+	owl_display *display;
+	uint32_t drm_connector_id;
+	uint32_t drm_crtc_id;
+	char drm_mode[68]; /* drmModeModeInfo */
+	struct gbm_surface *gbm_surface;
+	void *egl_surface;
+	uint32_t framebuffer_id;
+	struct gbm_bo *current_bo;
+	struct gbm_bo *next_bo;
+	bool page_flip_pending;
+	struct wl_global *wl_output_global;
+} owl_output;
 
-int owl_window_get_x(Owl_Window* window);
-int owl_window_get_y(Owl_Window* window);
-int owl_window_get_width(Owl_Window* window);
-int owl_window_get_height(Owl_Window* window);
-const char* owl_window_get_title(Owl_Window* window);
-const char* owl_window_get_app_id(Owl_Window* window);
-bool owl_window_is_fullscreen(Owl_Window* window);
-bool owl_window_is_focused(Owl_Window* window);
+/* window - public fields first, then internal */
+typedef struct owl_window {
+	/* Public - read/write these directly */
+	int x;
+	int y;
+	int width;
+	int height;
+	char *title;
+	char *app_id;
+	bool fullscreen;
+	bool focused;
+	bool mapped;
+	bool tiled;
+	void *user_data;
 
-Owl_Output** owl_get_outputs(Owl_Display* display, int* count);
-int owl_output_get_x(Owl_Output* output);
-int owl_output_get_y(Owl_Output* output);
-int owl_output_get_width(Owl_Output* output);
-int owl_output_get_height(Owl_Output* output);
-const char* owl_output_get_name(Owl_Output* output);
+	/* internal - don't touch */
+	owl_display *display;
+	owl_surface *surface;
+	struct wl_resource *xdg_surface_resource;
+	struct wl_resource *xdg_toplevel_resource;
+	int geometry_x;
+	int geometry_y;
+	int geometry_width;
+	int geometry_height;
+	uint32_t pending_serial;
+	bool pending_configure;
+	struct wl_list link;
+} owl_window;
 
-void owl_set_window_callback(Owl_Display* display, Owl_Window_Event type, Owl_Window_Callback callback, void* data);
-void owl_set_input_callback(Owl_Display* display, Owl_Input_Event type, Owl_Input_Callback callback, void* data);
-void owl_set_output_callback(Owl_Display* display, Owl_Output_Event type, Owl_Output_Callback callback, void* data);
-void owl_set_layer_surface_callback(Owl_Display* display, Owl_Layer_Surface_Event type, Owl_Layer_Surface_Callback callback, void* data);
+/* layer surface - public fields first, then internal */
+typedef struct owl_layer_surface {
+	/* public - read these directly */
+	owl_layer layer;
+	uint32_t anchor;
+	int32_t exclusive_zone;
+	int32_t margin_top;
+	int32_t margin_right;
+	int32_t margin_bottom;
+	int32_t margin_left;
+	owl_keyboard_interactivity keyboard_interactivity;
+	int32_t width;
+	int32_t height;
+	char *namespace;
+	bool mapped;
 
-Owl_Layer_Surface** owl_get_layer_surfaces(Owl_Display* display, int* count);
-Owl_Layer owl_layer_surface_get_layer(Owl_Layer_Surface* surface);
-uint32_t owl_layer_surface_get_anchor(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_exclusive_zone(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_margin_top(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_margin_right(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_margin_bottom(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_margin_left(Owl_Layer_Surface* surface);
-Owl_Keyboard_Interactivity owl_layer_surface_get_keyboard_interactivity(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_width(Owl_Layer_Surface* surface);
-int owl_layer_surface_get_height(Owl_Layer_Surface* surface);
-const char* owl_layer_surface_get_namespace(Owl_Layer_Surface* surface);
-bool owl_layer_surface_is_mapped(Owl_Layer_Surface* surface);
+	/* internal - don't touch */
+	owl_display *display;
+	owl_surface *surface;
+	struct wl_resource *layer_surface_resource;
+	owl_output *output;
+	int32_t configured_width;
+	int32_t configured_height;
+	uint32_t pending_serial;
+	bool initial_configure_sent;
+} owl_layer_surface;
 
-uint32_t owl_input_get_keycode(Owl_Input* input);
-uint32_t owl_input_get_keysym(Owl_Input* input);
-uint32_t owl_input_get_modifiers(Owl_Input* input);
-uint32_t owl_input_get_button(Owl_Input* input);
-int owl_input_get_pointer_x(Owl_Input* input);
-int owl_input_get_pointer_y(Owl_Input* input);
+/* Workspace - public fields first, then internal */
+typedef struct owl_workspace {
+	/* Public - read these directly */
+	char *name;
+	uint32_t state;
+	int32_t coordinate;
 
-#define OWL_MOD_SHIFT   (1 << 0)
-#define OWL_MOD_CTRL    (1 << 1)
-#define OWL_MOD_ALT     (1 << 2)
-#define OWL_MOD_SUPER   (1 << 3)
+	/* Internal - don't touch */
+	owl_display *display;
+	char *id;
+	struct wl_list resources;
+	struct wl_list link;
+} owl_workspace;
 
-Owl_Workspace* owl_workspace_create(Owl_Display* display, const char* name);
-void owl_workspace_destroy(Owl_Workspace* workspace);
-void owl_workspace_set_state(Owl_Workspace* workspace, uint32_t state);
-void owl_workspace_set_coordinates(Owl_Workspace* workspace, int32_t x);
-void owl_workspace_commit(Owl_Display* display);
-const char* owl_workspace_get_name(Owl_Workspace* workspace);
-uint32_t owl_workspace_get_state(Owl_Workspace* workspace);
-void owl_set_workspace_callback(Owl_Display* display, Owl_Workspace_Event type, Owl_Workspace_Callback callback, void* data);
+/* Callbacks */
+typedef void (*owl_window_callback)(owl_display *display, owl_window *window, void *data);
+typedef bool (*owl_input_callback)(owl_display *display, owl_input *input, void *data);
+typedef void (*owl_output_callback)(owl_display *display, owl_output *output, void *data);
+typedef void (*owl_layer_surface_callback)(owl_display *display, owl_layer_surface *surface, void *data);
+typedef void (*owl_workspace_callback)(owl_display *display, owl_workspace *workspace, void *data);
+
+/* Display - kept opaque, too much internal state */
+owl_display *owl_display_create(void);
+void owl_display_destroy(owl_display *display);
+void owl_display_run(owl_display *display);
+void owl_display_terminate(owl_display *display);
+const char *owl_display_get_socket(owl_display *display);
+void owl_display_get_pointer(owl_display *display, int *x, int *y);
+owl_window **owl_display_get_windows(owl_display *display, int *count);
+owl_output **owl_display_get_outputs(owl_display *display, int *count);
+owl_layer_surface **owl_display_get_layer_surfaces(owl_display *display, int *count);
+
+/* Window actions - these actually do things */
+void owl_window_focus(owl_window *window);
+void owl_window_move(owl_window *window, int x, int y);
+void owl_window_resize(owl_window *window, int width, int height);
+void owl_window_close(owl_window *window);
+void owl_window_set_fullscreen(owl_window *window, bool fullscreen);
+void owl_window_set_tiled(owl_window *window, bool tiled);
+
+/* Workspace actions */
+owl_workspace *owl_workspace_create(owl_display *display, const char *name);
+void owl_workspace_destroy(owl_workspace *workspace);
+void owl_workspace_set_state(owl_workspace *workspace, uint32_t state);
+void owl_workspace_set_coordinates(owl_workspace *workspace, int32_t x);
+void owl_workspace_commit(owl_display *display);
+
+/* Callbacks */
+void owl_set_window_callback(owl_display *display, owl_window_event type, owl_window_callback callback, void *data);
+void owl_set_input_callback(owl_display *display, owl_input_event type, owl_input_callback callback, void *data);
+void owl_set_output_callback(owl_display *display, owl_output_event type, owl_output_callback callback, void *data);
+void owl_set_layer_surface_callback(owl_display *display, owl_layer_surface_event type, owl_layer_surface_callback callback, void *data);
+void owl_set_workspace_callback(owl_display *display, owl_workspace_event type, owl_workspace_callback callback, void *data);
 
 #endif
