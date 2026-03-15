@@ -23,11 +23,11 @@ static bool is_visible(dwc_toplevel *toplevel) {
 }
 
 /**
- * is_tiled() - returns true if toplevel should participate in tiling layout.
+ * is_arranged() - returns true if toplevel should participate in tiling layout.
  * a tiled window is visible, not floating, and not fullscreen.
  * @toplevel: toplevel to check
  */
-static bool is_tiled(dwc_toplevel *toplevel) {
+static bool is_arranged(dwc_toplevel *toplevel) {
 	return is_visible(toplevel) && !toplevel->is_floating && !toplevel->is_fullscreen;
 }
 
@@ -41,6 +41,21 @@ static bool is_tiled(dwc_toplevel *toplevel) {
  */
 static bool anchored_to(uint32_t anchor, uint32_t edge) {
 	return (anchor & edge) == edge;
+}
+
+/**
+ * get_win_width() - niri-style window width calculation
+ * @area_w: usable screen width
+ * @gap: gap size in pixels
+ * @proportion: window width as fraction of screen (0.0-1.0)
+ *
+ * formula: (area_w - gap) * proportion - gap
+ * ensures N windows at 1/N proportion fit exactly with gaps between them.
+ *
+ * Return: calculated window width in pixels
+ */
+static int get_win_width(int area_w, int gap, float proportion) {
+    return (int)((area_w - gap) * proportion - gap);
 }
 
 /**
@@ -102,17 +117,17 @@ static rect get_usable_area(dwc_server *server) {
 }
 
 /**
- * count_tiled() - counts number of tiled windows. a tiled window is a toplevel
- * that is not floating, not fullscreen, and visible.
+ * count_tiled() - counts number of arranged windows. an arrnaged window is a 
+ * toplevel that is not floating, not fullscreen, and visible.
  * @server: dwc server containing the toplevel list
  *
- * Return: number of tiled windows on the current tagset
+ * Return: number of arranged windows on the current tagset
  */
-static int count_tiled(dwc_server *server) {
+static int count_arranged(dwc_server *server) {
 	int n = 0;
 	dwc_toplevel *t;
 	for (t = server->toplevels; t; t = t->next) {
-		if (is_tiled(t)) {
+		if (is_arranged(t)) {
 			n++;
 		}
 	}
@@ -120,76 +135,111 @@ static int count_tiled(dwc_server *server) {
 }
 
 /**
- * arrange() - for now, this function just arranges the tiled windows in a dwm
- * style mfact way. tiling mode is the only layout currently, and i will ofc 
- * add layouts soon.
+ * arrange() - scroll layout. windows arranged horizontally in a strip.
+ * scrolls just enough to keep focused window visible (niri-style "fit" mode).
  * @server: dwc server
- *
  */
 void arrange(dwc_server *server) {
-    /* todo: implement actual layouts, and call arrange(dwc->layout?) */
 	rect area = get_usable_area(server);
 	if (area.w <= 0 || area.h <= 0) return;
 
-    /* todo: remove global, get from config struct */
-    int g = gap; 
-
+	int g = gap;
 	dwc_toplevel *t;
 
-    /* move invisible windows way offscreen. */
+	/* move invisible windows offscreen */
 	for (t = server->toplevels; t; t = t->next) {
 		if (!is_visible(t)) {
 			owl_window_move(t->window, -9999, -9999);
 		}
 	}
 
-	int n = count_tiled(server);
-	if (n == 0) return;
-
-	/* single window fills usable area minus gaps */
-	if (n == 1) {
-		for (t = server->toplevels; t; t = t->next) {
-			if (is_tiled(t)) {
-				owl_window_set_tiled(t->window, true);
-				owl_window_move(t->window, area.x + g, area.y + g);
-				owl_window_resize(t->window, area.w - 2 * g, area.h - 2 * g);
-				break;
-			}
+	/* handle fullscreen window - covers everything */
+	for (t = server->toplevels; t; t = t->next) {
+		if (is_visible(t) && t->is_fullscreen) {
+			owl_window_move(t->window, area.x, area.y);
+			owl_window_resize(t->window, area.w, area.h);
+			return;
 		}
-		return;
 	}
 
-	/* available width after outer gaps (left, right) and inner gap */
-	int available_w = area.w - 3 * g;
-	int master_w = (int)(available_w * server->mfact);
-	int stack_w = available_w - master_w;
+	int n = count_arranged(server);
+	if (n == 0) return;
 
-	int i = 0;
-	int tile_y = area.y + g;
-	int stack_count = n - 1;
+
+	int win_height = area.h - 2 * g;
+
+	/* single window: left-align, reset scroll */
+	if (n == 1) {
+		server->scroll_offset = 0;
+		for (t = server->toplevels; t; t = t->next) {
+			if (!is_arranged(t)) continue;
+			int win_width = get_win_width(area.w, g, t->proportion);
+			owl_window_set_tiled(t->window, true);
+			owl_window_move(t->window, area.x + g, area.y + g);
+			owl_window_resize(t->window, win_width, win_height);
+			return;
+		}
+	}
+
+	/*
+	 * calculate strip layout: each window placed with gap before it
+	 * strip: [g][win1][g][win2][g][win3][g]
+	 * positions are relative to strip start (0)
+	 */
+	int focused_left = 0;
+	int focused_right = 0;
+	int pos = g;  /* start after left gap */
+	bool found_focused = false;
 
 	for (t = server->toplevels; t; t = t->next) {
-		if (!is_tiled(t)) continue;
+		if (!is_arranged(t)) continue;
 
-		owl_window_set_tiled(t->window, true);
-
-		if (i == 0) {
-			/* master window: outer gap on left, top, bottom */
-			int master_x = area.x + g;
-			int master_y = area.y + g;
-			int master_h = area.h - 2 * g;
-			owl_window_move(t->window, master_x, master_y);
-			owl_window_resize(t->window, master_w, master_h);
-		} else {
-			/* stack windows: inner gap from master, outer gap on right */
-			int remaining = stack_count - (i - 1);
-			int stack_h = (area.y + area.h - tile_y - g - (remaining - 1) * g) / remaining;
-			int stack_x = area.x + g + master_w + g;
-			owl_window_move(t->window, stack_x, tile_y);
-			owl_window_resize(t->window, stack_w, stack_h);
-			tile_y += stack_h + g;
+		int win_width = get_win_width(area.w, g, t->proportion);
+		if (t == server->focused) {
+			focused_left = pos;
+			focused_right = pos + win_width;
+			found_focused = true;
 		}
-		i++;
+		pos += win_width + g;
+	}
+
+	/* if focused isn't tiled, use first tiled */
+	if (!found_focused) {
+		pos = g;
+		for (t = server->toplevels; t; t = t->next) {
+			if (!is_arranged(t)) continue;
+            int win_width = get_win_width(area.w, g, t->proportion);
+			focused_left = pos;
+			focused_right = pos + win_width;
+			break;
+		}
+	}
+
+	/* adjust scroll only if focused window is outside viewport */
+	int view_left = server->scroll_offset;
+	int view_right = server->scroll_offset + area.w;
+
+	if (focused_left < view_left + g) {
+		server->scroll_offset = focused_left - g;
+	} else if (focused_right > view_right - g) {
+		server->scroll_offset = focused_right - area.w + g;
+	}
+
+	/* clamp scroll offset - don't scroll past start */
+	if (server->scroll_offset < 0) {
+		server->scroll_offset = 0;
+	}
+
+	/* position all tiled windows */
+	pos = area.x + g - server->scroll_offset;
+	for (t = server->toplevels; t; t = t->next) {
+		if (!is_arranged(t)) continue;
+
+        int win_width = get_win_width(area.w, g, t->proportion);
+		owl_window_set_tiled(t->window, true);
+		owl_window_move(t->window, pos, area.y + g);
+		owl_window_resize(t->window, win_width, win_height);
+		pos += win_width + g;
 	}
 }
 
@@ -285,41 +335,74 @@ void focusstack(void *arg) {
 	if (!g_server->focused) return;
 
 	dwc_toplevel *t = g_server->focused;
+	dwc_toplevel *target = NULL;
+
 	if (a->i > 0) {
+		/* focus next */
 		for (t = t->next; t; t = t->next) {
 			if (is_visible(t)) {
-				toplevel_focus(t);
-				return;
+				target = t;
+				break;
 			}
 		}
-		for (t = g_server->toplevels; t; t = t->next) {
-			if (is_visible(t)) {
-				toplevel_focus(t);
-				return;
+		/* wrap around to start */
+		if (!target) {
+			for (t = g_server->toplevels; t; t = t->next) {
+				if (is_visible(t)) {
+					target = t;
+					break;
+				}
 			}
 		}
 	} else {
+		/* focus prev */
 		for (t = t->prev; t; t = t->prev) {
 			if (is_visible(t)) {
-				toplevel_focus(t);
-				return;
+				target = t;
+				break;
 			}
 		}
-		dwc_toplevel *last = NULL;
-		for (t = g_server->toplevels; t; t = t->next) {
-			if (is_visible(t)) last = t;
+		/* wrap around to end */
+		if (!target) {
+			for (t = g_server->toplevels; t; t = t->next) {
+				if (is_visible(t)) target = t;
+			}
 		}
-		if (last) toplevel_focus(last);
+	}
+
+	if (target && target != g_server->focused) {
+		toplevel_focus(target);
+		arrange(g_server);
 	}
 }
 
-void setmfact(void *arg) {
+void setproportion(void *arg) {
 	arg_int *a = arg;
+	if (!g_server->focused) return;
 	float delta = (float)a->i / 100.0f;
-	float newmfact = g_server->mfact + delta;
-	if (newmfact < 0.1f) newmfact = 0.1f;
-	if (newmfact > 0.9f) newmfact = 0.9f;
-	g_server->mfact = newmfact;
+	float newprop = g_server->focused->proportion + delta;
+	if (newprop < 0.2f) newprop = 0.2f;
+	if (newprop > 1.0f) newprop = 1.0f;
+	g_server->focused->proportion = newprop;
+	g_server->focused->is_maximized = false;  /* manual resize clears maximize */
+	arrange(g_server);
+}
+
+void maximize(void *arg) {
+	(void)arg;
+	if (!g_server->focused) return;
+	dwc_toplevel *t = g_server->focused;
+
+	if (t->is_maximized) {
+		/* restore saved proportion */
+		t->proportion = t->saved_proportion;
+		t->is_maximized = false;
+	} else {
+		/* save current and set to full */
+		t->saved_proportion = t->proportion;
+		t->proportion = 1.0f;
+		t->is_maximized = true;
+	}
 	arrange(g_server);
 }
 
@@ -330,32 +413,6 @@ void togglefloating(void *arg) {
 	arrange(g_server);
 }
 
-void zoom(void *arg) {
-	(void)arg;
-	if (!g_server->focused || g_server->focused->is_floating) return;
-
-	dwc_toplevel *master = NULL;
-	dwc_toplevel *t;
-	for (t = g_server->toplevels; t; t = t->next) {
-		if (is_visible(t) && !t->is_floating) {
-			master = t;
-			break;
-		}
-	}
-
-	if (g_server->focused == master) {
-		for (t = master->next; t; t = t->next) {
-			if (is_visible(t) && !t->is_floating) {
-				toplevel_focus(t);
-				arrange(g_server);
-				return;
-			}
-		}
-	} else {
-		toplevel_focus(g_server->focused);
-		arrange(g_server);
-	}
-}
 
 /* callbacks */
 static void on_window_create(owl_display *display, owl_window *window, void *data) {
@@ -509,7 +566,6 @@ bool server_init(dwc_server *server) {
 
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
 	server->tagset = 1; /* start on tag 1 */
-	server->mfact = mfact; /* from config.h */
 
 	/* create 9 workspaces (1-9) */
 	for (int i = 0; i < 9; i++) {
@@ -564,12 +620,26 @@ dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
 	toplevel->tags = server->tagset; /* new windows get current tag */
 	toplevel->is_floating = false;
 	toplevel->is_fullscreen = false;
+	toplevel->is_maximized = false;
+	toplevel->proportion = default_proportion;
+	toplevel->saved_proportion = default_proportion;
 
-	toplevel->next = server->toplevels;
-	if (server->toplevels) {
-		server->toplevels->prev = toplevel;
+	/* insert after focused window (to the right in scroll layout) */
+	if (server->focused) {
+		toplevel->prev = server->focused;
+		toplevel->next = server->focused->next;
+		if (server->focused->next) {
+			server->focused->next->prev = toplevel;
+		}
+		server->focused->next = toplevel;
+	} else {
+		/* no focused window, insert at head */
+		toplevel->next = server->toplevels;
+		if (server->toplevels) {
+			server->toplevels->prev = toplevel;
+		}
+		server->toplevels = toplevel;
 	}
-	server->toplevels = toplevel;
 	server->toplevel_count++;
 
 	return toplevel;
@@ -624,20 +694,6 @@ void toplevel_focus(dwc_toplevel *toplevel) {
 
 	server->focused = toplevel;
 	owl_window_focus(toplevel->window);
-
-	/* move to front of list (master position for tiling) */
-	if (toplevel->prev) {
-		toplevel->prev->next = toplevel->next;
-		if (toplevel->next) {
-			toplevel->next->prev = toplevel->prev;
-		}
-		toplevel->prev = NULL;
-		toplevel->next = server->toplevels;
-		if (server->toplevels) {
-			server->toplevels->prev = toplevel;
-		}
-		server->toplevels = toplevel;
-	}
 }
 
 dwc_toplevel *toplevel_at(dwc_server *server, int x, int y) {

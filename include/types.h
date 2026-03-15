@@ -23,9 +23,12 @@ struct dwc_toplevel {
 	owl_window *window;
 	int pos_x;
 	int pos_y;
-	unsigned int tags;      
-	bool is_floating;       
+	unsigned int tags;
+	bool is_floating;
 	bool is_fullscreen;
+	bool is_maximized;      /* full width (proportion 1.0) but not fullscreen */
+	float proportion;       /* width as fraction of screen (0.0-1.0) */
+	float saved_proportion; /* stored when maximized, restored when unmaximized */
 	dwc_toplevel *next;
 	dwc_toplevel *prev;
 };
@@ -38,7 +41,7 @@ struct dwc_server {
 	int toplevel_count;
 
 	unsigned int tagset;
-	float mfact;
+	int scroll_offset;  /* current scroll position in the strip */
 
 	owl_workspace *workspaces[9];
 

@@ -5,8 +5,8 @@
 #include <owl/owl.h>
 
 /* appearance */
-static const int gap        = 5;    /* gap size in pixels (outer and inner) */
-static const float mfact    = 0.55; /* master area size [0.05..0.95] */
+static const int gap = 5;                     /* gap size in pixels */
+static const float default_proportion = 0.5;  /* window width as fraction of screen */
 
 /* tagging */
 #define TAGCOUNT 9
@@ -46,9 +46,9 @@ void tag(void *arg);
 void toggleview(void *arg);
 void toggletag(void *arg);
 void focusstack(void *arg);
-void setmfact(void *arg);
+void setproportion(void *arg);
+void maximize(void *arg);
 void togglefloating(void *arg);
-void zoom(void *arg);
 
 /* tag arguments */
 static arg_tag tag1 = { .tag = 1 << 0 };
@@ -66,8 +66,8 @@ static arg_cmd arg_term = { .cmd = termcmd };
 static arg_cmd arg_menu = { .cmd = menucmd };
 static arg_int arg_focusup   = { .i = -1 };
 static arg_int arg_focusdown = { .i = +1 };
-static arg_int arg_mfact_dec = { .i = -5 };  /* -5% */
-static arg_int arg_mfact_inc = { .i = +5 };  /* +5% */
+static arg_int arg_prop_dec = { .i = -10 };  /* shrink window 10% */
+static arg_int arg_prop_inc = { .i = +10 };  /* grow window 10% */
 
 static Key keys[] = {
 	/* modifier    key         function        argument */
@@ -76,12 +76,10 @@ static Key keys[] = {
 	{ MOD,         XKB_KEY_q,  killclient,     NULL },
 	{ MOD|OWL_MOD_SHIFT, XKB_KEY_Q, quit,      NULL },
 
-	{ MOD,         XKB_KEY_j,  focusstack,     &arg_focusdown },
-	{ MOD,         XKB_KEY_k,  focusstack,     &arg_focusup },
-	{ MOD,         XKB_KEY_h,  setmfact,       &arg_mfact_dec },
-	{ MOD,         XKB_KEY_l,  setmfact,       &arg_mfact_inc },
+	{ MOD,         XKB_KEY_h,  focusstack,     &arg_focusup },
+	{ MOD,         XKB_KEY_l,  focusstack,     &arg_focusdown },
+	{ MOD,         XKB_KEY_f,  maximize,       NULL },
 	{ MOD,         XKB_KEY_space, togglefloating, NULL },
-	{ MOD,         XKB_KEY_Tab, zoom,          NULL },
 
 	{ MOD,         XKB_KEY_1,  view,           &tag1 },
 	{ MOD,         XKB_KEY_2,  view,           &tag2 },
