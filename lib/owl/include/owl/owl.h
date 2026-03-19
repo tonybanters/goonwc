@@ -98,6 +98,19 @@ typedef enum {
 	OWL_WORKSPACE_EVENT_REMOVE,
 } owl_workspace_event;
 
+typedef enum {
+	OWL_GESTURE_SWIPE_BEGIN,
+	OWL_GESTURE_SWIPE_UPDATE,
+	OWL_GESTURE_SWIPE_END,
+} owl_gesture_event;
+
+/* Gesture data */
+typedef struct owl_gesture {
+	int fingers;
+	double dx;
+	double dy;
+} owl_gesture;
+
 /* Internal types - forward declared */
 typedef struct owl_surface owl_surface;
 typedef struct owl_shm_pool owl_shm_pool;
@@ -213,6 +226,8 @@ typedef bool (*owl_input_callback)(owl_display *display, owl_input *input, void 
 typedef void (*owl_output_callback)(owl_display *display, owl_output *output, void *data);
 typedef void (*owl_layer_surface_callback)(owl_display *display, owl_layer_surface *surface, void *data);
 typedef void (*owl_workspace_callback)(owl_display *display, owl_workspace *workspace, void *data);
+typedef void (*owl_gesture_callback)(owl_display *display, owl_gesture *gesture, void *data);
+typedef void (*owl_render_callback)(owl_display *display, owl_window *window, void *data);
 
 /* Display - kept opaque, too much internal state */
 owl_display *owl_display_create(void);
@@ -246,5 +261,10 @@ void owl_set_input_callback(owl_display *display, owl_input_event type, owl_inpu
 void owl_set_output_callback(owl_display *display, owl_output_event type, owl_output_callback callback, void *data);
 void owl_set_layer_surface_callback(owl_display *display, owl_layer_surface_event type, owl_layer_surface_callback callback, void *data);
 void owl_set_workspace_callback(owl_display *display, owl_workspace_event type, owl_workspace_callback callback, void *data);
+void owl_set_gesture_callback(owl_display *display, owl_gesture_event type, owl_gesture_callback callback, void *data);
+
+/* Rendering primitives */
+void owl_render_rect(int x, int y, int w, int h, float r, float g, float b, float a);
+void owl_set_render_callback(owl_display *display, owl_render_callback callback, void *data);
 
 #endif

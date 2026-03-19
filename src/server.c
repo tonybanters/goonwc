@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 /* global server pointer for keybinding functions */
 dwc_server *g_server = NULL;
@@ -23,12 +24,12 @@ static bool is_visible(dwc_toplevel *toplevel) {
 }
 
 /**
- * is_arranged() - returns true if toplevel should participate in tiling layout.
- * a tiled window is visible, not floating, and not fullscreen.
+ * is_tiled() - returns true if toplevel should participate in tiling layout.
+ * a tiled window is visible and not fullscreen.
  * @toplevel: toplevel to check
  */
-static bool is_arranged(dwc_toplevel *toplevel) {
-	return is_visible(toplevel) && !toplevel->is_floating && !toplevel->is_fullscreen;
+static bool is_tiled(dwc_toplevel *toplevel) {
+	return is_visible(toplevel) && !toplevel->is_fullscreen;
 }
 
 /**
@@ -47,15 +48,19 @@ static bool anchored_to(uint32_t anchor, uint32_t edge) {
  * get_win_width() - niri-style window width calculation
  * @area_w: usable screen width
  * @gap: gap size in pixels
- * @proportion: window width as fraction of screen (0.0-1.0)
+ * @width: dwc_width (proportion or fixed)
  *
- * formula: (area_w - gap) * proportion - gap
- * ensures N windows at 1/N proportion fit exactly with gaps between them.
+ * for proportion: (area_w - gap) * proportion - gap
+ * for fixed: just the fixed value
  *
  * Return: calculated window width in pixels
  */
-static int get_win_width(int area_w, int gap, float proportion) {
-    return (int)((area_w - gap) * proportion - gap);
+static int get_win_width(int area_w, int g, dwc_width width) {
+	if (width.type == DWC_WIDTH_FIXED) {
+		return (int) width.value;
+	}
+	/* proportion: scale to screen */
+	return (int)((area_w - g) * width.value - g);
 }
 
 /**
@@ -117,17 +122,17 @@ static rect get_usable_area(dwc_server *server) {
 }
 
 /**
- * count_tiled() - counts number of arranged windows. an arrnaged window is a 
- * toplevel that is not floating, not fullscreen, and visible.
+ * count_tiled() - counts number of tiled windows. a tiled window is 
+ * a toplevel that is not floating, not fullscreen, and visible.
  * @server: dwc server containing the toplevel list
  *
  * Return: number of arranged windows on the current tagset
  */
-static int count_arranged(dwc_server *server) {
+static int count_tiled(dwc_server *server) {
 	int n = 0;
 	dwc_toplevel *t;
 	for (t = server->toplevels; t; t = t->next) {
-		if (is_arranged(t)) {
+		if (is_tiled(t)) {
 			n++;
 		}
 	}
@@ -136,10 +141,11 @@ static int count_arranged(dwc_server *server) {
 
 /**
  * arrange() - scroll layout. windows arranged horizontally in a strip.
- * scrolls just enough to keep focused window visible (niri-style "fit" mode).
+ * scrolls just enough to keep focused window visible 
  * @server: dwc server
  */
 void arrange(dwc_server *server) {
+    /* todo: make this function take in a layout, and arranged based on the passed in layout.) */
 	rect area = get_usable_area(server);
 	if (area.w <= 0 || area.h <= 0) return;
 
@@ -162,21 +168,20 @@ void arrange(dwc_server *server) {
 		}
 	}
 
-	int n = count_arranged(server);
+	int n = count_tiled(server);
 	if (n == 0) return;
-
 
 	int win_height = area.h - 2 * g;
 
-	/* single window: left-align, reset scroll */
+	/* single window: smart gaps (no gaps), fill usable area */
 	if (n == 1) {
 		server->scroll_offset = 0;
 		for (t = server->toplevels; t; t = t->next) {
-			if (!is_arranged(t)) continue;
-			int win_width = get_win_width(area.w, g, t->proportion);
+			if (!is_tiled(t)) continue;
 			owl_window_set_tiled(t->window, true);
-			owl_window_move(t->window, area.x + g, area.y + g);
-			owl_window_resize(t->window, win_width, win_height);
+			owl_window_move(t->window, area.x, area.y);
+            /* todo: for smart gaps, should we always fullscreen 1 window? */
+			owl_window_resize(t->window, area.w, area.h);
 			return;
 		}
 	}
@@ -192,10 +197,10 @@ void arrange(dwc_server *server) {
 	bool found_focused = false;
 
 	for (t = server->toplevels; t; t = t->next) {
-		if (!is_arranged(t)) continue;
+		if (!is_tiled(t)) continue;
 
-		int win_width = get_win_width(area.w, g, t->proportion);
-		if (t == server->focused) {
+		int win_width = get_win_width(area.w, g, t->width);
+		if (t == server->focused_tiled) {
 			focused_left = pos;
 			focused_right = pos + win_width;
 			found_focused = true;
@@ -207,35 +212,37 @@ void arrange(dwc_server *server) {
 	if (!found_focused) {
 		pos = g;
 		for (t = server->toplevels; t; t = t->next) {
-			if (!is_arranged(t)) continue;
-            int win_width = get_win_width(area.w, g, t->proportion);
+			if (!is_tiled(t)) continue;
+            int win_width = get_win_width(area.w, g, t->width);
 			focused_left = pos;
 			focused_right = pos + win_width;
 			break;
 		}
 	}
 
-	/* adjust scroll only if focused window is outside viewport */
-	int view_left = server->scroll_offset;
-	int view_right = server->scroll_offset + area.w;
+	/* adjust scroll only if focused window is outside viewport (skip during gesture) */
+	if (!server->gesture_active) {
+		int view_left = server->scroll_offset;
+		int view_right = server->scroll_offset + area.w;
 
-	if (focused_left < view_left + g) {
-		server->scroll_offset = focused_left - g;
-	} else if (focused_right > view_right - g) {
-		server->scroll_offset = focused_right - area.w + g;
-	}
+		if (focused_left < view_left + g) {
+			server->scroll_offset = focused_left - g;
+		} else if (focused_right > view_right - g) {
+			server->scroll_offset = focused_right - area.w + g;
+		}
 
-	/* clamp scroll offset - don't scroll past start */
-	if (server->scroll_offset < 0) {
-		server->scroll_offset = 0;
+		/* clamp scroll offset - don't scroll past start */
+		if (server->scroll_offset < 0) {
+			server->scroll_offset = 0;
+		}
 	}
 
 	/* position all tiled windows */
 	pos = area.x + g - server->scroll_offset;
 	for (t = server->toplevels; t; t = t->next) {
-		if (!is_arranged(t)) continue;
+		if (!is_tiled(t)) continue;
 
-        int win_width = get_win_width(area.w, g, t->proportion);
+        int win_width = get_win_width(area.w, g, t->width);
 		owl_window_set_tiled(t->window, true);
 		owl_window_move(t->window, pos, area.y + g);
 		owl_window_resize(t->window, win_width, win_height);
@@ -260,8 +267,8 @@ void spawn(void *arg) {
 
 void killclient(void *arg) {
 	(void)arg;
-	if (g_server->focused) {
-		owl_window_close(g_server->focused->window);
+	if (g_server->focused_tiled) {
+		owl_window_close(g_server->focused_tiled->window);
 	}
 }
 
@@ -297,10 +304,10 @@ void view(void *arg) {
 
 void tag(void *arg) {
 	arg_tag *a = arg;
-	if (!g_server->focused) return;
-	g_server->focused->tags = a->tag;
+	if (!g_server->focused_tiled) return;
+	g_server->focused_tiled->tags = a->tag;
 	arrange(g_server);
-	if (!is_visible(g_server->focused)) {
+	if (!is_visible(g_server->focused_tiled)) {
 		dwc_toplevel *t;
 		for (t = g_server->toplevels; t; t = t->next) {
 			if (is_visible(t)) {
@@ -322,19 +329,19 @@ void toggleview(void *arg) {
 
 void toggletag(void *arg) {
 	arg_tag *a = arg;
-	if (!g_server->focused) return;
-	unsigned int newtags = g_server->focused->tags ^ a->tag;
+	if (!g_server->focused_tiled) return;
+	unsigned int newtags = g_server->focused_tiled->tags ^ a->tag;
 	if (newtags) {
-		g_server->focused->tags = newtags;
+		g_server->focused_tiled->tags = newtags;
 		arrange(g_server);
 	}
 }
 
 void focusstack(void *arg) {
 	arg_int *a = arg;
-	if (!g_server->focused) return;
+	if (!g_server->focused_tiled) return;
 
-	dwc_toplevel *t = g_server->focused;
+	dwc_toplevel *t = g_server->focused_tiled;
 	dwc_toplevel *target = NULL;
 
 	if (a->i > 0) {
@@ -370,47 +377,62 @@ void focusstack(void *arg) {
 		}
 	}
 
-	if (target && target != g_server->focused) {
+	if (target && target != g_server->focused_tiled) {
 		toplevel_focus(target);
 		arrange(g_server);
 	}
 }
 
-void setproportion(void *arg) {
+/**
+ * toggle_width() - cycle through width presets (niri-style)
+ * presets: 1/3, 1/2, 2/3 (wraps around)
+ */
+void toggle_width(void *arg) {
 	arg_int *a = arg;
-	if (!g_server->focused) return;
-	float delta = (float)a->i / 100.0f;
-	float newprop = g_server->focused->proportion + delta;
-	if (newprop < 0.2f) newprop = 0.2f;
-	if (newprop > 1.0f) newprop = 1.0f;
-	g_server->focused->proportion = newprop;
-	g_server->focused->is_maximized = false;  /* manual resize clears maximize */
+	if (!g_server->focused_tiled) return;
+	dwc_toplevel *t = g_server->focused_tiled;
+
+	int dir = (a && a->i < 0) ? -1 : 1;
+	t->preset_index += dir;
+
+	/* wrap around */
+	if (t->preset_index >= DWC_PRESET_COUNT) t->preset_index = 0;
+	if (t->preset_index < 0) t->preset_index = DWC_PRESET_COUNT - 1;
+
+	t->width.type = DWC_WIDTH_PROPORTION;
+	t->width.value = dwc_width_presets[t->preset_index];
 	arrange(g_server);
 }
 
+/**
+ * maximize() - set width to full screen (1.0)
+ */
 void maximize(void *arg) {
 	(void)arg;
-	if (!g_server->focused) return;
-	dwc_toplevel *t = g_server->focused;
+	if (!g_server->focused_tiled) return;
+	dwc_toplevel *t = g_server->focused_tiled;
 
-	if (t->is_maximized) {
-		/* restore saved proportion */
-		t->proportion = t->saved_proportion;
-		t->is_maximized = false;
+	/* toggle between full width and default preset */
+	if (t->width.type == DWC_WIDTH_PROPORTION && t->width.value >= 0.99f) {
+		/* restore to 1/2 (middle preset) */
+		t->preset_index = 1;
+		t->width.value = dwc_width_presets[1];
 	} else {
-		/* save current and set to full */
-		t->saved_proportion = t->proportion;
-		t->proportion = 1.0f;
-		t->is_maximized = true;
+		/* set to full */
+		t->preset_index = -1; /* not a preset */
+		t->width.type = DWC_WIDTH_PROPORTION;
+		t->width.value = 1.0f;
 	}
 	arrange(g_server);
 }
 
+/**
+ * togglefloating() - move window between tiled and floating space
+ * TODO: implement once floating space is fully set up
+ */
 void togglefloating(void *arg) {
 	(void)arg;
-	if (!g_server->focused) return;
-	g_server->focused->is_floating = !g_server->focused->is_floating;
-	arrange(g_server);
+	/* TODO: move window from toplevels to floating list or vice versa */
 }
 
 
@@ -441,11 +463,8 @@ static void on_window_request_move(owl_display *display, owl_window *window, voi
 	(void)data;
 	dwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
-		if (!toplevel->is_floating) {
-			toplevel->is_floating = true;
-			arrange(toplevel->server);
-		}
-		begin_interactive(toplevel, DWC_CURSOR_MOVE, 0);
+		/* TODO: convert to floating and move */
+		/* for now, tiled windows can't be moved via drag */
 	}
 }
 
@@ -454,11 +473,8 @@ static void on_window_request_resize(owl_display *display, owl_window *window, v
 	(void)data;
 	dwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
-		if (!toplevel->is_floating) {
-			toplevel->is_floating = true;
-			arrange(toplevel->server);
-		}
-		begin_interactive(toplevel, DWC_CURSOR_RESIZE, 0);
+		/* TODO: convert to floating and resize, or resize tiled width */
+		/* for now, tiled windows resize via keyboard only */
 	}
 }
 
@@ -539,6 +555,106 @@ static void on_layer_surface_unmap(owl_display *display, owl_layer_surface *surf
 	arrange(server);
 }
 
+static void on_render_window(owl_display *display, owl_window *window, void *data) {
+	(void)display;
+	dwc_server *server = data;
+	dwc_toplevel *toplevel = window->user_data;
+
+	if (!toplevel) return;
+
+	int x = window->x;
+	int y = window->y;
+	int w = window->width;
+	int h = window->height;
+	int bw = border_width;
+
+	const float *color = (toplevel == server->focused_tiled) ? border_focused : border_unfocused;
+
+	/* top */
+	owl_render_rect(x - bw, y - bw, w + 2 * bw, bw, color[0], color[1], color[2], color[3]);
+	/* bottom */
+	owl_render_rect(x - bw, y + h, w + 2 * bw, bw, color[0], color[1], color[2], color[3]);
+	/* left */
+	owl_render_rect(x - bw, y, bw, h, color[0], color[1], color[2], color[3]);
+	/* right */
+	owl_render_rect(x + w, y, bw, h, color[0], color[1], color[2], color[3]);
+}
+
+static void on_gesture_begin(owl_display *display, owl_gesture *gesture, void *data) {
+	(void)display;
+	dwc_server *server = data;
+
+	if (gesture->fingers == 3) {
+		server->gesture_active = true;
+	}
+}
+
+static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *data) {
+	(void)display;
+	dwc_server *server = data;
+
+	/* 3-finger horizontal swipe scrolls the strip */
+	if (gesture->fingers == 3) {
+		rect area = get_usable_area(server);
+		int g = gap;
+
+		/* calculate total strip width */
+		int total_width = g;
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+			if (is_tiled(t)) {
+				total_width += get_win_width(area.w, g, t->width) + g;
+			}
+		}
+
+		/* niri-style: positive dx = scroll view right */
+		server->scroll_offset += (int)(gesture->dx * 2.0);
+
+		/* niri-style bounds: allow overscroll by full screen width */
+		int min_scroll = -area.w;
+		int max_scroll = total_width;
+		if (server->scroll_offset < min_scroll) server->scroll_offset = min_scroll;
+		if (server->scroll_offset > max_scroll) server->scroll_offset = max_scroll;
+
+		arrange(server);
+	}
+}
+
+static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *data) {
+	(void)display;
+	dwc_server *server = data;
+
+	if (gesture->fingers == 3) {
+		server->gesture_active = false;
+
+		rect area = get_usable_area(server);
+		int g = gap;
+		int view_center = server->scroll_offset + area.w / 2;
+
+		dwc_toplevel *best = NULL;
+		int best_dist = INT_MAX;
+		int pos = g;
+
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+			if (!is_tiled(t)) continue;
+			int win_width = get_win_width(area.w, g, t->width);
+			int win_center = pos + win_width / 2;
+			int dist = abs(win_center - view_center);
+			if (dist < best_dist) {
+				best_dist = dist;
+				best = t;
+			}
+			pos += win_width + g;
+		}
+
+		if (best && best != server->focused_tiled) {
+			server->focused_tiled = best;
+			owl_window_focus(best->window);
+		}
+
+		arrange(server);
+	}
+}
+
 bool server_init(dwc_server *server) {
 	memset(server, 0, sizeof(dwc_server));
 
@@ -563,6 +679,12 @@ bool server_init(dwc_server *server) {
 
 	owl_set_layer_surface_callback(server->display, OWL_LAYER_SURFACE_EVENT_MAP, on_layer_surface_map, server);
 	owl_set_layer_surface_callback(server->display, OWL_LAYER_SURFACE_EVENT_UNMAP, on_layer_surface_unmap, server);
+
+	owl_set_gesture_callback(server->display, OWL_GESTURE_SWIPE_BEGIN, on_gesture_begin, server);
+	owl_set_gesture_callback(server->display, OWL_GESTURE_SWIPE_UPDATE, on_gesture_update, server);
+	owl_set_gesture_callback(server->display, OWL_GESTURE_SWIPE_END, on_gesture_end, server);
+
+	owl_set_render_callback(server->display, on_render_window, server);
 
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
 	server->tagset = 1; /* start on tag 1 */
@@ -615,23 +737,20 @@ dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
 
 	toplevel->server = server;
 	toplevel->window = window;
-	toplevel->pos_x = 0;
-	toplevel->pos_y = 0;
 	toplevel->tags = server->tagset; /* new windows get current tag */
-	toplevel->is_floating = false;
 	toplevel->is_fullscreen = false;
-	toplevel->is_maximized = false;
-	toplevel->proportion = default_proportion;
-	toplevel->saved_proportion = default_proportion;
+	toplevel->preset_index = 1; /* start at 1/2 width */
+	toplevel->width.type = DWC_WIDTH_PROPORTION;
+	toplevel->width.value = dwc_width_presets[1]; /* 0.5 */
 
 	/* insert after focused window (to the right in scroll layout) */
-	if (server->focused) {
-		toplevel->prev = server->focused;
-		toplevel->next = server->focused->next;
-		if (server->focused->next) {
-			server->focused->next->prev = toplevel;
+	if (server->focused_tiled) {
+		toplevel->prev = server->focused_tiled;
+		toplevel->next = server->focused_tiled->next;
+		if (server->focused_tiled->next) {
+			server->focused_tiled->next->prev = toplevel;
 		}
-		server->focused->next = toplevel;
+		server->focused_tiled->next = toplevel;
 	} else {
 		/* no focused window, insert at head */
 		toplevel->next = server->toplevels;
@@ -652,19 +771,19 @@ void toplevel_destroy(dwc_toplevel *toplevel) {
 
 	dwc_server *server = toplevel->server;
 
-	if (server->focused == toplevel) {
-		server->focused = NULL;
+	if (server->focused_tiled == toplevel) {
+		server->focused_tiled = NULL;
 		/* focus next visible window */
 		dwc_toplevel *t;
 		for (t = server->toplevels; t; t = t->next) {
 			if (t != toplevel && is_visible(t)) {
-				server->focused = t;
+				server->focused_tiled = t;
 				owl_window_focus(t->window);
 				break;
 			}
 		}
 	}
-	if (server->grabbed_toplevel == toplevel) {
+	if (server->grabbed_tiled == toplevel) {
 		reset_cursor_mode(server);
 	}
 
@@ -688,11 +807,11 @@ void toplevel_focus(dwc_toplevel *toplevel) {
 
 	dwc_server *server = toplevel->server;
 
-	if (server->focused == toplevel) {
+	if (server->focused_tiled == toplevel) {
 		return;
 	}
 
-	server->focused = toplevel;
+	server->focused_tiled = toplevel;
 	owl_window_focus(toplevel->window);
 }
 
@@ -732,7 +851,7 @@ bool handle_keybinding(dwc_server *server, uint32_t keysym, uint32_t modifiers) 
 void begin_interactive(dwc_toplevel *toplevel, dwc_cursor_mode mode, uint32_t edges) {
 	dwc_server *server = toplevel->server;
 
-	server->grabbed_toplevel = toplevel;
+	server->grabbed_tiled = toplevel;
 	server->cursor_mode = mode;
 	server->resize_edges = edges;
 
@@ -748,11 +867,11 @@ void begin_interactive(dwc_toplevel *toplevel, dwc_cursor_mode mode, uint32_t ed
 
 void reset_cursor_mode(dwc_server *server) {
 	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
-	server->grabbed_toplevel = NULL;
+	server->grabbed_tiled = NULL;
 }
 
 void process_cursor_move(dwc_server *server, int x, int y) {
-	dwc_toplevel *toplevel = server->grabbed_toplevel;
+	dwc_toplevel *toplevel = server->grabbed_tiled;
 	if (!toplevel) {
 		return;
 	}
@@ -764,7 +883,7 @@ void process_cursor_move(dwc_server *server, int x, int y) {
 }
 
 void process_cursor_resize(dwc_server *server, int x, int y) {
-	dwc_toplevel *toplevel = server->grabbed_toplevel;
+	dwc_toplevel *toplevel = server->grabbed_tiled;
 	if (!toplevel) {
 		return;
 	}

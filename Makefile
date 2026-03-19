@@ -5,16 +5,9 @@ LDFLAGS = $(shell pkg-config --libs wayland-server xkbcommon libdrm gbm egl gles
 CFLAGS += $(shell pkg-config --cflags wayland-server xkbcommon libdrm gbm egl glesv2 libinput libudev)
 
 DWC_SRC = src/main.c src/server.c
-OWL_SRC = lib/owl/src/callbacks.c \
-          lib/owl/src/decoration.c \
-          lib/owl/src/display.c \
-          lib/owl/src/input.c \
-          lib/owl/src/layer_shell.c \
-          lib/owl/src/output.c \
+OWL_SRC = lib/owl/src/owl.c \
           lib/owl/src/render.c \
-          lib/owl/src/surface.c \
-          lib/owl/src/workspace.c \
-          lib/owl/src/xdg_shell.c
+          lib/owl/src/input.c
 
 PROTOCOL_XML = lib/owl/protocols/xdg-shell.xml
 PROTOCOL_H = build/xdg-shell-protocol.h

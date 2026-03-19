@@ -5,8 +5,10 @@
 #include <owl/owl.h>
 
 /* appearance */
-static const int gap = 5;                     /* gap size in pixels */
-static const float default_proportion = 0.5;  /* window width as fraction of screen */
+static const int gap = 5;
+static const int border_width = 2;
+static const float border_focused[]   = { 0.57f, 0.63f, 0.80f, 1.0f };  /* #929dcc */
+static const float border_unfocused[] = { 0.30f, 0.30f, 0.30f, 1.0f };  /* #4d4d4d */
 
 /* tagging */
 #define TAGCOUNT 9
@@ -46,7 +48,7 @@ void tag(void *arg);
 void toggleview(void *arg);
 void toggletag(void *arg);
 void focusstack(void *arg);
-void setproportion(void *arg);
+void toggle_width(void *arg);
 void maximize(void *arg);
 void togglefloating(void *arg);
 
@@ -64,10 +66,10 @@ static arg_tag tag9 = { .tag = 1 << 8 };
 /* other arguments */
 static arg_cmd arg_term = { .cmd = termcmd };
 static arg_cmd arg_menu = { .cmd = menucmd };
-static arg_int arg_focusup   = { .i = -1 };
-static arg_int arg_focusdown = { .i = +1 };
-static arg_int arg_prop_dec = { .i = -10 };  /* shrink window 10% */
-static arg_int arg_prop_inc = { .i = +10 };  /* grow window 10% */
+static arg_int arg_focusup    = { .i = -1 };
+static arg_int arg_focusdown  = { .i = +1 };
+static arg_int arg_width_prev = { .i = -1 };  /* cycle width preset backwards */
+static arg_int arg_width_next = { .i = +1 };  /* cycle width preset forwards */
 
 static Key keys[] = {
 	/* modifier    key         function        argument */
@@ -78,6 +80,8 @@ static Key keys[] = {
 
 	{ MOD,         XKB_KEY_h,  focusstack,     &arg_focusup },
 	{ MOD,         XKB_KEY_l,  focusstack,     &arg_focusdown },
+	{ MOD,         XKB_KEY_minus, toggle_width, &arg_width_prev },
+	{ MOD,         XKB_KEY_equal, toggle_width, &arg_width_next },
 	{ MOD,         XKB_KEY_f,  maximize,       NULL },
 	{ MOD,         XKB_KEY_space, togglefloating, NULL },
 

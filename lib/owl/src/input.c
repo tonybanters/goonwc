@@ -13,8 +13,8 @@
 #include <libinput.h>
 #include <wayland-server-protocol.h>
 
-static FILE* input_log = NULL;
-static void input_debug(const char* fmt, ...) {
+static FILE *input_log = NULL;
+static void input_debug(const char *fmt, ...) {
     if (!input_log) input_log = fopen("/tmp/owl_input.log", "w");
     if (input_log) {
         va_list args;
@@ -26,14 +26,14 @@ static void input_debug(const char* fmt, ...) {
 }
 
 typedef struct owl_keyboard {
-    struct wl_resource* resource;
+    struct wl_resource *resource;
     struct wl_list link;
 } owl_keyboard;
 
 typedef struct owl_pointer {
-    struct wl_resource* resource;
+    struct wl_resource *resource;
     struct wl_list link;
-    owl_display* display;
+    owl_display *display;
 } owl_pointer;
 
 static uint32_t get_time_ms(void) {
@@ -42,7 +42,7 @@ static uint32_t get_time_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-static int open_restricted(const char* path, int flags, void* user_data) {
+static int open_restricted(const char *path, int flags, void *user_data) {
     (void)user_data;
     int fd = open(path, flags);
     if (fd < 0) {
@@ -53,7 +53,7 @@ static int open_restricted(const char* path, int flags, void* user_data) {
     return fd;
 }
 
-static void close_restricted(int fd, void* user_data) {
+static void close_restricted(int fd, void *user_data) {
     (void)user_data;
     close(fd);
 }
@@ -63,7 +63,7 @@ static const struct libinput_interface libinput_interface = {
     .close_restricted = close_restricted,
 };
 
-static void update_modifier_state(owl_display* display) {
+static void update_modifier_state(owl_display *display) {
     if (!display->xkb_state) {
         return;
     }
@@ -84,13 +84,17 @@ static void update_modifier_state(owl_display* display) {
     }
 }
 
-static void handle_keyboard_key(owl_display* display, struct libinput_event_keyboard* event) {
+static void handle_keyboard_key(owl_display *display, struct libinput_event_keyboard *event) {
     uint32_t keycode = libinput_event_keyboard_get_key(event);
     enum libinput_key_state state = libinput_event_keyboard_get_key_state(event);
 
     if (display->xkb_state) {
-        xkb_state_update_key(display->xkb_state, keycode + 8,
-                            state == LIBINPUT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
+        xkb_state_update_key(
+            display->xkb_state,
+            /* todo fix magic number here */
+            keycode + 8,
+            state == LIBINPUT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP
+        );
         update_modifier_state(display);
     }
 
@@ -122,8 +126,8 @@ static void handle_keyboard_key(owl_display* display, struct libinput_event_keyb
     owl_seat_send_modifiers(display);
 }
 
-static owl_window* find_window_at(owl_display* display, int x, int y) {
-    owl_window* window;
+static owl_window *find_window_at(owl_display *display, int x, int y) {
+    owl_window *window;
     wl_list_for_each(window, &display->windows, link) {
         if (!window->mapped) {
             continue;
@@ -136,12 +140,12 @@ static owl_window* find_window_at(owl_display* display, int x, int y) {
     return NULL;
 }
 
-static void update_pointer_focus(owl_display* display) {
+static void update_pointer_focus(owl_display *display) {
     int px = (int)display->pointer_x;
     int py = (int)display->pointer_y;
 
-    owl_window* window = find_window_at(display, px, py);
-    owl_surface* surface = window ? window->surface : NULL;
+    owl_window *window = find_window_at(display, px, py);
+    owl_surface *surface = window ? window->surface : NULL;
 
     if (surface != display->pointer_focus) {
         double local_x = px - (window ? window->x : 0);
@@ -150,7 +154,7 @@ static void update_pointer_focus(owl_display* display) {
     }
 }
 
-static void handle_pointer_motion(owl_display* display, struct libinput_event_pointer* event) {
+static void handle_pointer_motion(owl_display *display, struct libinput_event_pointer *event) {
     double dx = libinput_event_pointer_get_dx(event);
     double dy = libinput_event_pointer_get_dy(event);
 
@@ -158,7 +162,7 @@ static void handle_pointer_motion(owl_display* display, struct libinput_event_po
     display->pointer_y += dy;
 
     if (display->output_count > 0) {
-        owl_output* output = display->outputs[0];
+        owl_output *output = display->outputs[0];
         if (display->pointer_x < 0) display->pointer_x = 0;
         if (display->pointer_y < 0) display->pointer_y = 0;
         if (display->pointer_x >= output->width) display->pointer_x = output->width - 1;
@@ -178,7 +182,7 @@ static void handle_pointer_motion(owl_display* display, struct libinput_event_po
 
     owl_invoke_input_callback(display, OWL_INPUT_EVENT_POINTER_MOTION, &input);
 
-    owl_window* focused_window = find_window_at(display, (int)display->pointer_x, (int)display->pointer_y);
+    owl_window *focused_window = find_window_at(display, (int)display->pointer_x, (int)display->pointer_y);
     if (focused_window) {
         double local_x = display->pointer_x - focused_window->x;
         double local_y = display->pointer_y - focused_window->y;
@@ -186,7 +190,7 @@ static void handle_pointer_motion(owl_display* display, struct libinput_event_po
     }
 }
 
-static void handle_pointer_button(owl_display* display, struct libinput_event_pointer* event) {
+static void handle_pointer_button(owl_display *display, struct libinput_event_pointer *event) {
     uint32_t button = libinput_event_pointer_get_button(event);
     enum libinput_button_state state = libinput_event_pointer_get_button_state(event);
 
@@ -209,17 +213,26 @@ static void handle_pointer_button(owl_display* display, struct libinput_event_po
     owl_seat_send_pointer_button(display, button, wl_state);
 }
 
-static int handle_libinput_event(int fd, uint32_t mask, void* data) {
+static void handle_gesture_swipe(owl_display *display, struct libinput_event_gesture *event, owl_gesture_event type) {
+    owl_gesture gesture = {
+        .fingers = libinput_event_gesture_get_finger_count(event),
+        .dx = (type == OWL_GESTURE_SWIPE_UPDATE) ? libinput_event_gesture_get_dx(event) : 0.0,
+        .dy = (type == OWL_GESTURE_SWIPE_UPDATE) ? libinput_event_gesture_get_dy(event) : 0.0,
+    };
+    owl_invoke_gesture_callback(display, type, &gesture);
+}
+
+static int handle_libinput_event(int fd, uint32_t mask, void *data) {
     (void)fd;
     (void)mask;
-    owl_display* display = data;
+    owl_display *display = data;
 
     if (libinput_dispatch(display->libinput) != 0) {
         fprintf(stderr, "owl: failed to dispatch libinput\n");
         return 0;
     }
 
-    struct libinput_event* event;
+    struct libinput_event *event;
     while ((event = libinput_get_event(display->libinput)) != NULL) {
         enum libinput_event_type type = libinput_event_get_type(event);
 
@@ -233,6 +246,15 @@ static int handle_libinput_event(int fd, uint32_t mask, void* data) {
             case LIBINPUT_EVENT_POINTER_BUTTON:
                 handle_pointer_button(display, libinput_event_get_pointer_event(event));
                 break;
+            case LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN:
+                handle_gesture_swipe(display, libinput_event_get_gesture_event(event), OWL_GESTURE_SWIPE_BEGIN);
+                break;
+            case LIBINPUT_EVENT_GESTURE_SWIPE_UPDATE:
+                handle_gesture_swipe(display, libinput_event_get_gesture_event(event), OWL_GESTURE_SWIPE_UPDATE);
+                break;
+            case LIBINPUT_EVENT_GESTURE_SWIPE_END:
+                handle_gesture_swipe(display, libinput_event_get_gesture_event(event), OWL_GESTURE_SWIPE_END);
+                break;
             default:
                 break;
         }
@@ -243,12 +265,12 @@ static int handle_libinput_event(int fd, uint32_t mask, void* data) {
     return 0;
 }
 
-static int create_keymap_fd(owl_display* display) {
+static int create_keymap_fd(owl_display *display) {
     if (!display->xkb_keymap) {
         return -1;
     }
 
-    char* keymap_string = xkb_keymap_get_as_string(display->xkb_keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
+    char *keymap_string = xkb_keymap_get_as_string(display->xkb_keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
     if (!keymap_string) {
         return -1;
     }
@@ -270,7 +292,7 @@ static int create_keymap_fd(owl_display* display) {
         return -1;
     }
 
-    void* ptr = mmap(NULL, display->keymap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    void *ptr = mmap(NULL, display->keymap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (ptr == MAP_FAILED) {
         close(fd);
         free(keymap_string);
@@ -284,7 +306,7 @@ static int create_keymap_fd(owl_display* display) {
     return fd;
 }
 
-void owl_input_init(owl_display* display) {
+void owl_input_init(owl_display *display) {
     display->udev = udev_new();
     if (!display->udev) {
         fprintf(stderr, "owl: failed to create udev context\n");
@@ -328,11 +350,11 @@ void owl_input_init(owl_display* display) {
         WL_EVENT_READABLE, handle_libinput_event, display);
 
     libinput_dispatch(display->libinput);
-    struct libinput_event* event;
+    struct libinput_event *event;
     while ((event = libinput_get_event(display->libinput)) != NULL) {
         enum libinput_event_type type = libinput_event_get_type(event);
         if (type == LIBINPUT_EVENT_DEVICE_ADDED) {
-            struct libinput_device* device = libinput_event_get_device(event);
+            struct libinput_device *device = libinput_event_get_device(event);
             fprintf(stderr, "owl: input device added: %s\n", libinput_device_get_name(device));
         }
         libinput_event_destroy(event);
@@ -344,7 +366,7 @@ void owl_input_init(owl_display* display) {
     fprintf(stderr, "owl: input initialized\n");
 }
 
-void owl_input_cleanup(owl_display* display) {
+void owl_input_cleanup(owl_display *display) {
     if (display->libinput_event_source) {
         wl_event_source_remove(display->libinput_event_source);
         display->libinput_event_source = NULL;
@@ -381,7 +403,7 @@ void owl_input_cleanup(owl_display* display) {
     }
 }
 
-static void keyboard_release(struct wl_client* client, struct wl_resource* resource) {
+static void keyboard_release(struct wl_client *client, struct wl_resource *resource) {
     (void)client;
     wl_resource_destroy(resource);
 }
@@ -390,30 +412,30 @@ static const struct wl_keyboard_interface keyboard_interface = {
     .release = keyboard_release,
 };
 
-static void keyboard_destroy_handler(struct wl_resource* resource) {
-    owl_keyboard* keyboard = wl_resource_get_user_data(resource);
+static void keyboard_destroy_handler(struct wl_resource *resource) {
+    owl_keyboard *keyboard = wl_resource_get_user_data(resource);
     if (keyboard) {
         wl_list_remove(&keyboard->link);
         free(keyboard);
     }
 }
 
-static void pointer_set_cursor(struct wl_client* client, struct wl_resource* resource,
-                               uint32_t serial, struct wl_resource* surface_resource,
+static void pointer_set_cursor(struct wl_client *client, struct wl_resource *resource,
+                               uint32_t serial, struct wl_resource *surface_resource,
                                int32_t hotspot_x, int32_t hotspot_y) {
     (void)client;
     (void)serial;
 
     input_debug("pointer_set_cursor: surface_resource=%p hotspot=%d,%d\n",
-                (void*)surface_resource, hotspot_x, hotspot_y);
+                (void *)surface_resource, hotspot_x, hotspot_y);
 
-    owl_pointer* pointer = wl_resource_get_user_data(resource);
+    owl_pointer *pointer = wl_resource_get_user_data(resource);
     if (!pointer || !pointer->display) {
         input_debug("  no pointer or display\n");
         return;
     }
 
-    owl_display* display = pointer->display;
+    owl_display *display = pointer->display;
 
     if (!surface_resource) {
         input_debug("  hiding cursor\n");
@@ -421,21 +443,21 @@ static void pointer_set_cursor(struct wl_client* client, struct wl_resource* res
         return;
     }
 
-    owl_surface* cursor_surface = owl_surface_from_resource(surface_resource);
+    owl_surface *cursor_surface = owl_surface_from_resource(surface_resource);
     if (!cursor_surface) {
         input_debug("  cursor surface not found\n");
         return;
     }
 
     input_debug("  cursor surface=%p has_content=%d\n",
-                (void*)cursor_surface, cursor_surface->has_content);
+                (void *)cursor_surface, cursor_surface->has_content);
 
     display->cursor_surface = cursor_surface;
     display->cursor_hotspot_x = hotspot_x;
     display->cursor_hotspot_y = hotspot_y;
 }
 
-static void pointer_release(struct wl_client* client, struct wl_resource* resource) {
+static void pointer_release(struct wl_client *client, struct wl_resource *resource) {
     (void)client;
     wl_resource_destroy(resource);
 }
@@ -445,19 +467,19 @@ static const struct wl_pointer_interface pointer_interface = {
     .release = pointer_release,
 };
 
-static void pointer_destroy_handler(struct wl_resource* resource) {
-    owl_pointer* pointer = wl_resource_get_user_data(resource);
+static void pointer_destroy_handler(struct wl_resource *resource) {
+    owl_pointer *pointer = wl_resource_get_user_data(resource);
     if (pointer) {
         wl_list_remove(&pointer->link);
         free(pointer);
     }
 }
 
-static void seat_get_pointer(struct wl_client* client, struct wl_resource* resource, uint32_t id) {
-    owl_display* display = wl_resource_get_user_data(resource);
-    input_debug("seat_get_pointer: client=%p id=%u\n", (void*)client, id);
+static void seat_get_pointer(struct wl_client *client, struct wl_resource *resource, uint32_t id) {
+    owl_display *display = wl_resource_get_user_data(resource);
+    input_debug("seat_get_pointer: client=%p id=%u\n", (void *)client, id);
 
-    owl_pointer* pointer = calloc(1, sizeof(owl_pointer));
+    owl_pointer *pointer = calloc(1, sizeof(owl_pointer));
     if (!pointer) {
         wl_resource_post_no_memory(resource);
         return;
@@ -476,11 +498,11 @@ static void seat_get_pointer(struct wl_client* client, struct wl_resource* resou
     wl_list_insert(&display->pointers, &pointer->link);
 }
 
-static void seat_get_keyboard(struct wl_client* client, struct wl_resource* resource, uint32_t id) {
-    owl_display* display = wl_resource_get_user_data(resource);
-    input_debug("seat_get_keyboard: client=%p id=%u\n", (void*)client, id);
+static void seat_get_keyboard(struct wl_client *client, struct wl_resource *resource, uint32_t id) {
+    owl_display *display = wl_resource_get_user_data(resource);
+    input_debug("seat_get_keyboard: client=%p id=%u\n", (void *)client, id);
 
-    owl_keyboard* keyboard = calloc(1, sizeof(owl_keyboard));
+    owl_keyboard *keyboard = calloc(1, sizeof(owl_keyboard));
     if (!keyboard) {
         wl_resource_post_no_memory(resource);
         return;
@@ -497,7 +519,7 @@ static void seat_get_keyboard(struct wl_client* client, struct wl_resource* reso
 
     wl_resource_set_implementation(keyboard->resource, &keyboard_interface, keyboard, keyboard_destroy_handler);
     wl_list_insert(&display->keyboards, &keyboard->link);
-    input_debug("  keyboard resource=%p\n", (void*)keyboard->resource);
+    input_debug("  keyboard resource=%p\n", (void *)keyboard->resource);
 
     if (display->keymap_fd >= 0) {
         input_debug("  sending keymap fd=%d size=%u\n", display->keymap_fd, display->keymap_size);
@@ -512,13 +534,13 @@ static void seat_get_keyboard(struct wl_client* client, struct wl_resource* reso
     input_debug("seat_get_keyboard done\n");
 }
 
-static void seat_get_touch(struct wl_client* client, struct wl_resource* resource, uint32_t id) {
+static void seat_get_touch(struct wl_client *client, struct wl_resource *resource, uint32_t id) {
     (void)client;
     (void)resource;
     (void)id;
 }
 
-static void seat_release(struct wl_client* client, struct wl_resource* resource) {
+static void seat_release(struct wl_client *client, struct wl_resource *resource) {
     (void)client;
     wl_resource_destroy(resource);
 }
@@ -530,11 +552,11 @@ static const struct wl_seat_interface seat_interface = {
     .release = seat_release,
 };
 
-static void seat_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
-    owl_display* display = data;
+static void seat_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
+    owl_display *display = data;
 
     uint32_t bound_version = version < 7 ? version : 7;
-    struct wl_resource* resource = wl_resource_create(client, &wl_seat_interface, bound_version, id);
+    struct wl_resource *resource = wl_resource_create(client, &wl_seat_interface, bound_version, id);
     if (!resource) {
         wl_client_post_no_memory(client);
         return;
@@ -549,7 +571,7 @@ static void seat_bind(struct wl_client* client, void* data, uint32_t version, ui
     }
 }
 
-void owl_seat_init(owl_display* display) {
+void owl_seat_init(owl_display *display) {
     wl_list_init(&display->keyboards);
     wl_list_init(&display->pointers);
 
@@ -564,16 +586,16 @@ void owl_seat_init(owl_display* display) {
     fprintf(stderr, "owl: seat initialized\n");
 }
 
-void owl_seat_cleanup(owl_display* display) {
+void owl_seat_cleanup(owl_display *display) {
     if (display->seat_global) {
         wl_global_destroy(display->seat_global);
         display->seat_global = NULL;
     }
 }
 
-void owl_seat_set_keyboard_focus(owl_display* display, owl_surface* surface) {
+void owl_seat_set_keyboard_focus(owl_display *display, owl_surface *surface) {
     input_debug("owl_seat_set_keyboard_focus: surface=%p current_focus=%p\n",
-                (void*)surface, (void*)display->keyboard_focus);
+                (void *)surface, (void *)display->keyboard_focus);
 
     if (display->keyboard_focus == surface) {
         input_debug("  same surface, returning\n");
@@ -584,12 +606,12 @@ void owl_seat_set_keyboard_focus(owl_display* display, owl_surface* surface) {
     input_debug("  serial=%u\n", serial);
 
     if (display->keyboard_focus) {
-        struct wl_client* old_client = wl_resource_get_client(display->keyboard_focus->resource);
-        input_debug("  sending leave to old client %p\n", (void*)old_client);
-        owl_keyboard* keyboard;
+        struct wl_client *old_client = wl_resource_get_client(display->keyboard_focus->resource);
+        input_debug("  sending leave to old client %p\n", (void *)old_client);
+        owl_keyboard *keyboard;
         wl_list_for_each(keyboard, &display->keyboards, link) {
             if (wl_resource_get_client(keyboard->resource) == old_client) {
-                input_debug("    sending leave to keyboard %p\n", (void*)keyboard->resource);
+                input_debug("    sending leave to keyboard %p\n", (void *)keyboard->resource);
                 wl_keyboard_send_leave(keyboard->resource, serial, display->keyboard_focus->resource);
             }
         }
@@ -598,13 +620,13 @@ void owl_seat_set_keyboard_focus(owl_display* display, owl_surface* surface) {
     display->keyboard_focus = surface;
 
     if (surface) {
-        struct wl_client* new_client = wl_resource_get_client(surface->resource);
-        input_debug("  sending enter to new client %p\n", (void*)new_client);
+        struct wl_client *new_client = wl_resource_get_client(surface->resource);
+        input_debug("  sending enter to new client %p\n", (void *)new_client);
         struct wl_array keys;
         wl_array_init(&keys);
 
         int keyboard_count = 0;
-        owl_keyboard* keyboard;
+        owl_keyboard *keyboard;
         wl_list_for_each(keyboard, &display->keyboards, link) {
             keyboard_count++;
         }
@@ -612,10 +634,10 @@ void owl_seat_set_keyboard_focus(owl_display* display, owl_surface* surface) {
 
         wl_list_for_each(keyboard, &display->keyboards, link) {
             input_debug("    checking keyboard %p client=%p\n",
-                        (void*)keyboard->resource,
-                        (void*)wl_resource_get_client(keyboard->resource));
+                        (void *)keyboard->resource,
+                        (void *)wl_resource_get_client(keyboard->resource));
             if (wl_resource_get_client(keyboard->resource) == new_client) {
-                input_debug("    sending enter to keyboard %p\n", (void*)keyboard->resource);
+                input_debug("    sending enter to keyboard %p\n", (void *)keyboard->resource);
                 wl_keyboard_send_enter(keyboard->resource, serial, surface->resource, &keys);
                 input_debug("    enter sent\n");
             }
@@ -629,7 +651,7 @@ void owl_seat_set_keyboard_focus(owl_display* display, owl_surface* surface) {
     input_debug("owl_seat_set_keyboard_focus done\n");
 }
 
-void owl_seat_set_pointer_focus(owl_display* display, owl_surface* surface, double x, double y) {
+void owl_seat_set_pointer_focus(owl_display *display, owl_surface *surface, double x, double y) {
     if (display->pointer_focus == surface) {
         return;
     }
@@ -637,8 +659,8 @@ void owl_seat_set_pointer_focus(owl_display* display, owl_surface* surface, doub
     uint32_t serial = wl_display_next_serial(display->wayland_display);
 
     if (display->pointer_focus) {
-        struct wl_client* old_client = wl_resource_get_client(display->pointer_focus->resource);
-        owl_pointer* pointer;
+        struct wl_client *old_client = wl_resource_get_client(display->pointer_focus->resource);
+        owl_pointer *pointer;
         wl_list_for_each(pointer, &display->pointers, link) {
             if (wl_resource_get_client(pointer->resource) == old_client) {
                 wl_pointer_send_leave(pointer->resource, serial, display->pointer_focus->resource);
@@ -650,8 +672,8 @@ void owl_seat_set_pointer_focus(owl_display* display, owl_surface* surface, doub
     display->pointer_focus = surface;
 
     if (surface) {
-        struct wl_client* new_client = wl_resource_get_client(surface->resource);
-        owl_pointer* pointer;
+        struct wl_client *new_client = wl_resource_get_client(surface->resource);
+        owl_pointer *pointer;
         wl_list_for_each(pointer, &display->pointers, link) {
             if (wl_resource_get_client(pointer->resource) == new_client) {
                 wl_pointer_send_enter(pointer->resource, serial, surface->resource,
@@ -662,16 +684,16 @@ void owl_seat_set_pointer_focus(owl_display* display, owl_surface* surface, doub
     }
 }
 
-void owl_seat_send_key(owl_display* display, uint32_t key, uint32_t state) {
+void owl_seat_send_key(owl_display *display, uint32_t key, uint32_t state) {
     if (!display->keyboard_focus) {
         return;
     }
 
-    struct wl_client* client = wl_resource_get_client(display->keyboard_focus->resource);
+    struct wl_client *client = wl_resource_get_client(display->keyboard_focus->resource);
     uint32_t serial = wl_display_next_serial(display->wayland_display);
     uint32_t time = get_time_ms();
 
-    owl_keyboard* keyboard;
+    owl_keyboard *keyboard;
     wl_list_for_each(keyboard, &display->keyboards, link) {
         if (wl_resource_get_client(keyboard->resource) == client) {
             wl_keyboard_send_key(keyboard->resource, serial, time, key, state);
@@ -679,19 +701,19 @@ void owl_seat_send_key(owl_display* display, uint32_t key, uint32_t state) {
     }
 }
 
-void owl_seat_send_modifiers(owl_display* display) {
+void owl_seat_send_modifiers(owl_display *display) {
     if (!display->keyboard_focus || !display->xkb_state) {
         return;
     }
 
-    struct wl_client* client = wl_resource_get_client(display->keyboard_focus->resource);
+    struct wl_client *client = wl_resource_get_client(display->keyboard_focus->resource);
     uint32_t serial = wl_display_next_serial(display->wayland_display);
     uint32_t depressed = xkb_state_serialize_mods(display->xkb_state, XKB_STATE_MODS_DEPRESSED);
     uint32_t latched = xkb_state_serialize_mods(display->xkb_state, XKB_STATE_MODS_LATCHED);
     uint32_t locked = xkb_state_serialize_mods(display->xkb_state, XKB_STATE_MODS_LOCKED);
     uint32_t group = xkb_state_serialize_layout(display->xkb_state, XKB_STATE_LAYOUT_EFFECTIVE);
 
-    owl_keyboard* keyboard;
+    owl_keyboard *keyboard;
     wl_list_for_each(keyboard, &display->keyboards, link) {
         if (wl_resource_get_client(keyboard->resource) == client) {
             wl_keyboard_send_modifiers(keyboard->resource, serial, depressed, latched, locked, group);
@@ -699,15 +721,15 @@ void owl_seat_send_modifiers(owl_display* display) {
     }
 }
 
-void owl_seat_send_pointer_motion(owl_display* display, double x, double y) {
+void owl_seat_send_pointer_motion(owl_display *display, double x, double y) {
     if (!display->pointer_focus) {
         return;
     }
 
-    struct wl_client* client = wl_resource_get_client(display->pointer_focus->resource);
+    struct wl_client *client = wl_resource_get_client(display->pointer_focus->resource);
     uint32_t time = get_time_ms();
 
-    owl_pointer* pointer;
+    owl_pointer *pointer;
     wl_list_for_each(pointer, &display->pointers, link) {
         if (wl_resource_get_client(pointer->resource) == client) {
             wl_pointer_send_motion(pointer->resource, time,
@@ -717,16 +739,16 @@ void owl_seat_send_pointer_motion(owl_display* display, double x, double y) {
     }
 }
 
-void owl_seat_send_pointer_button(owl_display* display, uint32_t button, uint32_t state) {
+void owl_seat_send_pointer_button(owl_display *display, uint32_t button, uint32_t state) {
     if (!display->pointer_focus) {
         return;
     }
 
-    struct wl_client* client = wl_resource_get_client(display->pointer_focus->resource);
+    struct wl_client *client = wl_resource_get_client(display->pointer_focus->resource);
     uint32_t serial = wl_display_next_serial(display->wayland_display);
     uint32_t time = get_time_ms();
 
-    owl_pointer* pointer;
+    owl_pointer *pointer;
     wl_list_for_each(pointer, &display->pointers, link) {
         if (wl_resource_get_client(pointer->resource) == client) {
             wl_pointer_send_button(pointer->resource, serial, time, button, state);

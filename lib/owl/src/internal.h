@@ -91,6 +91,11 @@ typedef struct {
 	void *data;
 } workspace_callback_entry;
 
+typedef struct {
+	owl_gesture_callback callback;
+	void *data;
+} gesture_callback_entry;
+
 struct owl_display {
 	struct wl_display *wayland_display;
 	struct wl_event_loop *event_loop;
@@ -148,6 +153,9 @@ struct owl_display {
 	workspace_callback_entry workspace_callbacks[3][OWL_MAX_CALLBACKS];
 	int workspace_callback_count[3];
 
+	gesture_callback_entry gesture_callbacks[3][OWL_MAX_CALLBACKS];
+	int gesture_callback_count[3];
+
 	struct wl_event_source *drm_event_source;
 	struct wl_event_source *libinput_event_source;
 
@@ -164,6 +172,9 @@ struct owl_display {
 	owl_surface *cursor_surface;
 	int32_t cursor_hotspot_x;
 	int32_t cursor_hotspot_y;
+
+	owl_render_callback render_callback;
+	void *render_callback_data;
 };
 
 /* Internal functions */
@@ -217,5 +228,7 @@ void owl_invoke_workspace_callback(owl_display *display, owl_workspace_event typ
 
 void owl_decoration_init(owl_display *display);
 void owl_decoration_cleanup(owl_display *display);
+
+void owl_invoke_gesture_callback(owl_display *display, owl_gesture_event type, owl_gesture *gesture);
 
 #endif
