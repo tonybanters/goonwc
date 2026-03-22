@@ -192,6 +192,8 @@ struct owl_display {
 	struct xkb_keymap *xkb_keymap;
 	struct xkb_state *xkb_state;
 	uint32_t modifier_state;
+	int32_t keyboard_repeat_rate;
+	int32_t keyboard_repeat_delay;
 
 	owl_output *outputs[OWL_MAX_OUTPUTS];
 	int output_count;

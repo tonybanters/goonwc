@@ -664,6 +664,8 @@ bool server_init(dwc_server *server) {
 		return false;
 	}
 
+	owl_set_keyboard_repeat(server->display, repeat_rate, repeat_delay);
+
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_CREATE, on_window_create, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_DESTROY, on_window_destroy, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_REQUEST_MOVE, on_window_request_move, server);

@@ -267,4 +267,7 @@ void owl_set_gesture_callback(owl_display *display, owl_gesture_event type, owl_
 void owl_render_rect(int x, int y, int w, int h, float r, float g, float b, float a);
 void owl_set_render_callback(owl_display *display, owl_render_callback callback, void *data);
 
+/* Keyboard settings */
+void owl_set_keyboard_repeat(owl_display *display, int32_t rate, int32_t delay);
+
 #endif

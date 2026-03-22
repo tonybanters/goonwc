@@ -10,6 +10,10 @@ static const int border_width = 2;
 static const float border_focused[]   = { 0.57f, 0.63f, 0.80f, 1.0f };  /* #929dcc */
 static const float border_unfocused[] = { 0.30f, 0.30f, 0.30f, 1.0f };  /* #4d4d4d */
 
+/* keyboard repeat rate (equivalent to: xset r rate <delay> <rate>) */
+static const int repeat_rate = 35;   /* keys per second */
+static const int repeat_delay = 200; /* ms before repeat starts */
+
 /* tagging */
 #define TAGCOUNT 9
 

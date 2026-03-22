@@ -610,8 +610,10 @@ static void seat_get_keyboard(struct wl_client *client, struct wl_resource *reso
     }
 
     if (version >= 4) {
-        input_debug("  sending repeat_info\n");
-        wl_keyboard_send_repeat_info(keyboard->resource, 25, 600);
+        int32_t rate = display->keyboard_repeat_rate > 0 ? display->keyboard_repeat_rate : 35;
+        int32_t delay = display->keyboard_repeat_delay > 0 ? display->keyboard_repeat_delay : 200;
+        input_debug("  sending repeat_info rate=%d delay=%d\n", rate, delay);
+        wl_keyboard_send_repeat_info(keyboard->resource, rate, delay);
     }
     input_debug("seat_get_keyboard done\n");
 }

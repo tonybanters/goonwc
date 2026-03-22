@@ -3496,3 +3496,9 @@ void owl_display_get_pointer(owl_display *display, int *x, int *y) {
 	if (x) *x = display ? (int)display->pointer_x : 0;
 	if (y) *y = display ? (int)display->pointer_y : 0;
 }
+
+void owl_set_keyboard_repeat(owl_display *display, int32_t rate, int32_t delay) {
+	if (!display) return;
+	display->keyboard_repeat_rate = rate;
+	display->keyboard_repeat_delay = delay;
+}
