@@ -140,16 +140,80 @@ static owl_window *find_window_at(owl_display *display, int x, int y) {
     return NULL;
 }
 
+static void get_layer_surface_position(owl_layer_surface *ls, owl_output *output, int *x, int *y) {
+    int out_w = output->width;
+    int out_h = output->height;
+    int surf_w = ls->configured_width;
+    int surf_h = ls->configured_height;
+
+    if (ls->anchor & OWL_ANCHOR_LEFT) {
+        *x = ls->margin_left;
+    } else if (ls->anchor & OWL_ANCHOR_RIGHT) {
+        *x = out_w - surf_w - ls->margin_right;
+    } else {
+        *x = (out_w - surf_w) / 2;
+    }
+
+    if (ls->anchor & OWL_ANCHOR_TOP) {
+        *y = ls->margin_top;
+    } else if (ls->anchor & OWL_ANCHOR_BOTTOM) {
+        *y = out_h - surf_h - ls->margin_bottom;
+    } else {
+        *y = (out_h - surf_h) / 2;
+    }
+}
+
+static owl_layer_surface *find_layer_surface_at(owl_display *display, int px, int py,
+                                                 int *out_x, int *out_y) {
+    if (display->output_count == 0) return NULL;
+    owl_output *output = display->outputs[0];
+    if (!output) return NULL;
+
+    owl_layer layers[] = { OWL_LAYER_OVERLAY, OWL_LAYER_TOP };
+    for (int l = 0; l < 2; l++) {
+        for (int i = display->layer_surface_count - 1; i >= 0; i--) {
+            owl_layer_surface *ls = display->layer_surfaces[i];
+            if (!ls || ls->layer != layers[l] || !ls->mapped || !ls->surface) continue;
+
+            int w = ls->configured_width;
+            int h = ls->configured_height;
+            if (w <= 0 || h <= 0) continue;
+
+            int x, y;
+            get_layer_surface_position(ls, output, &x, &y);
+
+            if (px >= x && px < x + w && py >= y && py < y + h) {
+                *out_x = x;
+                *out_y = y;
+                return ls;
+            }
+        }
+    }
+    return NULL;
+}
+
 static void update_pointer_focus(owl_display *display) {
     int px = (int)display->pointer_x;
     int py = (int)display->pointer_y;
+    owl_surface *surface = NULL;
+    double local_x = 0, local_y = 0;
 
-    owl_window *window = find_window_at(display, px, py);
-    owl_surface *surface = window ? window->surface : NULL;
+    int ls_x, ls_y;
+    owl_layer_surface *ls = find_layer_surface_at(display, px, py, &ls_x, &ls_y);
+    if (ls) {
+        surface = ls->surface;
+        local_x = px - ls_x;
+        local_y = py - ls_y;
+    } else {
+        owl_window *window = find_window_at(display, px, py);
+        if (window) {
+            surface = window->surface;
+            local_x = px - window->x;
+            local_y = py - window->y;
+        }
+    }
 
     if (surface != display->pointer_focus) {
-        double local_x = px - (window ? window->x : 0);
-        double local_y = py - (window ? window->y : 0);
         owl_seat_set_pointer_focus(display, surface, local_x, local_y);
     }
 }
@@ -182,11 +246,25 @@ static void handle_pointer_motion(owl_display *display, struct libinput_event_po
 
     owl_invoke_input_callback(display, OWL_INPUT_EVENT_POINTER_MOTION, &input);
 
-    owl_window *focused_window = find_window_at(display, (int)display->pointer_x, (int)display->pointer_y);
-    if (focused_window) {
-        double local_x = display->pointer_x - focused_window->x;
-        double local_y = display->pointer_y - focused_window->y;
-        owl_seat_send_pointer_motion(display, local_x, local_y);
+    if (display->current_drag.active) {
+        owl_drag_update(display, display->pointer_x, display->pointer_y);
+    } else {
+        int px = (int)display->pointer_x;
+        int py = (int)display->pointer_y;
+        int ls_x, ls_y;
+        owl_layer_surface *ls = find_layer_surface_at(display, px, py, &ls_x, &ls_y);
+        if (ls) {
+            double local_x = display->pointer_x - ls_x;
+            double local_y = display->pointer_y - ls_y;
+            owl_seat_send_pointer_motion(display, local_x, local_y);
+        } else {
+            owl_window *focused_window = find_window_at(display, px, py);
+            if (focused_window) {
+                double local_x = display->pointer_x - focused_window->x;
+                double local_y = display->pointer_y - focused_window->y;
+                owl_seat_send_pointer_motion(display, local_x, local_y);
+            }
+        }
     }
 }
 
@@ -208,9 +286,13 @@ static void handle_pointer_button(owl_display *display, struct libinput_event_po
 
     owl_invoke_input_callback(display, event_type, &input);
 
-    uint32_t wl_state = state == LIBINPUT_BUTTON_STATE_PRESSED
-        ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED;
-    owl_seat_send_pointer_button(display, button, wl_state);
+    if (display->current_drag.active && state == LIBINPUT_BUTTON_STATE_RELEASED) {
+        owl_drag_drop(display);
+    } else {
+        uint32_t wl_state = state == LIBINPUT_BUTTON_STATE_PRESSED
+            ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED;
+        owl_seat_send_pointer_button(display, button, wl_state);
+    }
 }
 
 static void handle_gesture_swipe(owl_display *display, struct libinput_event_gesture *event, owl_gesture_event type) {
@@ -647,6 +729,9 @@ void owl_seat_set_keyboard_focus(owl_display *display, owl_surface *surface) {
         input_debug("  sending modifiers\n");
         owl_seat_send_modifiers(display);
         input_debug("  modifiers sent\n");
+
+        owl_selection_send_offer(display, new_client);
+        owl_primary_send_offer(display, new_client);
     }
     input_debug("owl_seat_set_keyboard_focus done\n");
 }
@@ -664,7 +749,8 @@ void owl_seat_set_pointer_focus(owl_display *display, owl_surface *surface, doub
         wl_list_for_each(pointer, &display->pointers, link) {
             if (wl_resource_get_client(pointer->resource) == old_client) {
                 wl_pointer_send_leave(pointer->resource, serial, display->pointer_focus->resource);
-                wl_pointer_send_frame(pointer->resource);
+                if (wl_resource_get_version(pointer->resource) >= 5)
+                    wl_pointer_send_frame(pointer->resource);
             }
         }
     }
@@ -678,7 +764,8 @@ void owl_seat_set_pointer_focus(owl_display *display, owl_surface *surface, doub
             if (wl_resource_get_client(pointer->resource) == new_client) {
                 wl_pointer_send_enter(pointer->resource, serial, surface->resource,
                                       wl_fixed_from_double(x), wl_fixed_from_double(y));
-                wl_pointer_send_frame(pointer->resource);
+                if (wl_resource_get_version(pointer->resource) >= 5)
+                    wl_pointer_send_frame(pointer->resource);
             }
         }
     }
@@ -734,7 +821,8 @@ void owl_seat_send_pointer_motion(owl_display *display, double x, double y) {
         if (wl_resource_get_client(pointer->resource) == client) {
             wl_pointer_send_motion(pointer->resource, time,
                                    wl_fixed_from_double(x), wl_fixed_from_double(y));
-            wl_pointer_send_frame(pointer->resource);
+            if (wl_resource_get_version(pointer->resource) >= 5)
+                wl_pointer_send_frame(pointer->resource);
         }
     }
 }
@@ -752,7 +840,8 @@ void owl_seat_send_pointer_button(owl_display *display, uint32_t button, uint32_
     wl_list_for_each(pointer, &display->pointers, link) {
         if (wl_resource_get_client(pointer->resource) == client) {
             wl_pointer_send_button(pointer->resource, serial, time, button, state);
-            wl_pointer_send_frame(pointer->resource);
+            if (wl_resource_get_version(pointer->resource) >= 5)
+                wl_pointer_send_frame(pointer->resource);
         }
     }
 }

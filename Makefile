@@ -29,6 +29,14 @@ XDG_DECORATION_XML = lib/owl/protocols/xdg-decoration-unstable-v1.xml
 XDG_DECORATION_H = build/xdg-decoration-protocol.h
 XDG_DECORATION_C = build/xdg-decoration-protocol.c
 
+SCREENCOPY_XML = lib/owl/protocols/wlr-screencopy-unstable-v1.xml
+SCREENCOPY_H = build/wlr-screencopy-unstable-v1-protocol.h
+SCREENCOPY_C = build/wlr-screencopy-unstable-v1-protocol.c
+
+PRIMARY_SEL_XML = lib/owl/protocols/wp-primary-selection-unstable-v1.xml
+PRIMARY_SEL_H = build/wp-primary-selection-unstable-v1-protocol.h
+PRIMARY_SEL_C = build/wp-primary-selection-unstable-v1-protocol.c
+
 ALL_SRC = $(DWC_SRC) $(OWL_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
@@ -38,7 +46,7 @@ TARGET = dwc
 
 all: $(TARGET)
 
-$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(OBJ)
+$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 build:
@@ -74,7 +82,19 @@ $(XDG_DECORATION_H): $(XDG_DECORATION_XML) | build
 $(XDG_DECORATION_C): $(XDG_DECORATION_XML) | build
 	wayland-scanner private-code $< $@
 
-%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C)
+$(SCREENCOPY_H): $(SCREENCOPY_XML) | build
+	wayland-scanner server-header $< $@
+
+$(SCREENCOPY_C): $(SCREENCOPY_XML) | build
+	wayland-scanner private-code $< $@
+
+$(PRIMARY_SEL_H): $(PRIMARY_SEL_XML) | build
+	wayland-scanner server-header $< $@
+
+$(PRIMARY_SEL_C): $(PRIMARY_SEL_XML) | build
+	wayland-scanner private-code $< $@
+
+%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

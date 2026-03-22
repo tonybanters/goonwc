@@ -35,6 +35,10 @@
 #include "ext-workspace-v1-protocol.c"
 #include "xdg-decoration-protocol.h"
 #include "xdg-decoration-protocol.c"
+#include "wlr-screencopy-unstable-v1-protocol.h"
+#include "wlr-screencopy-unstable-v1-protocol.c"
+#include "wp-primary-selection-unstable-v1-protocol.h"
+#include "wp-primary-selection-unstable-v1-protocol.c"
 
 /* ==========================================================================
  * Debug logging
@@ -265,7 +269,8 @@ static void shm_pool_create_buffer(struct wl_client *client, struct wl_resource 
 		return;
 	}
 
-	if (format != WL_SHM_FORMAT_ARGB8888 && format != WL_SHM_FORMAT_XRGB8888) {
+	if (format != WL_SHM_FORMAT_ARGB8888 && format != WL_SHM_FORMAT_XRGB8888 &&
+	    format != WL_SHM_FORMAT_ABGR8888 && format != WL_SHM_FORMAT_XBGR8888) {
 		wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FORMAT, "unsupported format");
 		return;
 	}
@@ -352,7 +357,7 @@ static void shm_create_pool(struct wl_client *client, struct wl_resource *resour
 	pool->size = size;
 	pool->ref_count = 1;
 
-	pool->data = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+	pool->data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (pool->data == MAP_FAILED) {
 		close(fd);
 		free(pool);
@@ -388,6 +393,9 @@ static void shm_bind(struct wl_client *client, void *data, uint32_t version, uin
 
 	wl_resource_set_implementation(resource, &shm_interface, display, NULL);
 	wl_shm_send_format(resource, WL_SHM_FORMAT_ARGB8888);
+	wl_shm_send_format(resource, WL_SHM_FORMAT_XRGB8888);
+	wl_shm_send_format(resource, WL_SHM_FORMAT_ABGR8888);
+	wl_shm_send_format(resource, WL_SHM_FORMAT_XBGR8888);
 	wl_shm_send_format(resource, WL_SHM_FORMAT_XRGB8888);
 }
 
@@ -725,27 +733,156 @@ static void subcompositor_bind(struct wl_client *client, void *data, uint32_t ve
 	wl_resource_set_implementation(resource, &subcompositor_interface, NULL, NULL);
 }
 
-/* data device stubs */
-static void data_offer_destroy(struct wl_client *client, struct wl_resource *resource) {
-	(void)client; wl_resource_destroy(resource);
-}
-static void data_offer_accept(struct wl_client *client, struct wl_resource *resource,
-                              uint32_t serial, const char *mime_type) {
-	(void)client; (void)resource; (void)serial; (void)mime_type;
-}
-static void data_offer_receive(struct wl_client *client, struct wl_resource *resource,
-                               const char *mime_type, int32_t fd) {
-	(void)client; (void)resource; (void)mime_type; close(fd);
-}
-static void data_offer_finish(struct wl_client *client, struct wl_resource *resource) {
-	(void)client; (void)resource;
-}
-static void data_offer_set_actions(struct wl_client *client, struct wl_resource *resource,
-                                   uint32_t dnd_actions, uint32_t preferred_action) {
-	(void)client; (void)resource; (void)dnd_actions; (void)preferred_action;
+/* ==========================================================================
+ * Data device / Clipboard / Drag-and-drop
+ * ========================================================================== */
+
+static void data_source_destroy_handler(struct wl_resource *resource) {
+	owl_data_source *source = wl_resource_get_user_data(resource);
+	if (!source) return;
+
+	owl_display *display = source->display;
+
+	if (display->clipboard_source == source) {
+		display->clipboard_source = NULL;
+	}
+
+	if (display->current_drag.source == source) {
+		owl_drag_cancel(display);
+	}
+
+	for (int i = 0; i < source->mime_type_count; i++) {
+		free(source->mime_types[i]);
+	}
+	free(source);
 }
 
-static const struct wl_data_offer_interface data_offer_interface = {
+static void data_source_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void data_source_offer(struct wl_client *client, struct wl_resource *resource,
+                              const char *mime_type) {
+	(void)client;
+	owl_data_source *source = wl_resource_get_user_data(resource);
+	fprintf(stderr, "clipboard: data_source_offer mime=%s source=%p\n", mime_type, (void*)source);
+	if (!source || source->mime_type_count >= OWL_MAX_MIME_TYPES) return;
+
+	source->mime_types[source->mime_type_count++] = strdup(mime_type);
+}
+
+static void data_source_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                    uint32_t dnd_actions) {
+	(void)client;
+	owl_data_source *source = wl_resource_get_user_data(resource);
+	if (!source) return;
+
+	source->dnd_actions = dnd_actions;
+	source->actions_set = true;
+}
+
+static const struct wl_data_source_interface data_source_impl = {
+	.offer = data_source_offer,
+	.destroy = data_source_destroy,
+	.set_actions = data_source_set_actions,
+};
+
+static void data_offer_destroy_handler(struct wl_resource *resource) {
+	owl_data_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer) return;
+
+	owl_display *display = offer->display;
+	if (display->current_drag.offer == offer) {
+		display->current_drag.offer = NULL;
+	}
+	free(offer);
+}
+
+static void data_offer_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void data_offer_accept(struct wl_client *client, struct wl_resource *resource,
+                              uint32_t serial, const char *mime_type) {
+	(void)client;
+	(void)serial;
+	owl_data_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer || !offer->source) return;
+
+	if (mime_type) {
+		wl_data_source_send_target(offer->source->resource, mime_type);
+	}
+}
+
+static void data_offer_receive(struct wl_client *client, struct wl_resource *resource,
+                               const char *mime_type, int32_t fd) {
+	(void)client;
+	owl_data_offer *offer = wl_resource_get_user_data(resource);
+	fprintf(stderr, "clipboard: data_offer_receive mime=%s offer=%p source=%p fd=%d\n",
+		mime_type, (void*)offer, offer ? (void*)offer->source : NULL, fd);
+	if (!offer || !offer->source || !offer->source->resource) {
+		fprintf(stderr, "clipboard: receive failed - no offer/source\n");
+		close(fd);
+		return;
+	}
+
+	fprintf(stderr, "clipboard: forwarding to source\n");
+	wl_data_source_send_send(offer->source->resource, mime_type, fd);
+	close(fd);
+}
+
+static void data_offer_finish(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	owl_data_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer || !offer->source) return;
+
+	if (offer->source->resource) {
+		wl_data_source_send_dnd_finished(offer->source->resource);
+	}
+}
+
+static uint32_t negotiate_dnd_action(uint32_t source_actions, uint32_t offer_actions,
+                                     uint32_t preferred) {
+	uint32_t available = source_actions & offer_actions;
+	if (!available) return WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
+
+	if (preferred && (available & preferred)) return preferred;
+	if (available & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY)
+		return WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY;
+	if (available & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE)
+		return WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE;
+	if (available & WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK)
+		return WL_DATA_DEVICE_MANAGER_DND_ACTION_ASK;
+	return WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE;
+}
+
+static void data_offer_set_actions(struct wl_client *client, struct wl_resource *resource,
+                                   uint32_t dnd_actions, uint32_t preferred_action) {
+	(void)client;
+	owl_data_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer) return;
+
+	offer->dnd_actions = dnd_actions;
+	offer->preferred_dnd_action = preferred_action;
+
+	if (offer->source && offer->source->actions_set) {
+		uint32_t action = negotiate_dnd_action(offer->source->dnd_actions,
+			dnd_actions, preferred_action);
+		offer->source->current_dnd_action = action;
+
+		if (wl_resource_get_version(resource) >= WL_DATA_OFFER_ACTION_SINCE_VERSION) {
+			wl_data_offer_send_action(resource, action);
+		}
+		if (offer->source->resource &&
+		    wl_resource_get_version(offer->source->resource) >= WL_DATA_SOURCE_ACTION_SINCE_VERSION) {
+			wl_data_source_send_action(offer->source->resource, action);
+		}
+	}
+}
+
+static const struct wl_data_offer_interface data_offer_impl = {
 	.accept = data_offer_accept,
 	.receive = data_offer_receive,
 	.destroy = data_offer_destroy,
@@ -753,36 +890,97 @@ static const struct wl_data_offer_interface data_offer_interface = {
 	.set_actions = data_offer_set_actions,
 };
 
-static void data_source_destroy(struct wl_client *client, struct wl_resource *resource) {
-	(void)client; wl_resource_destroy(resource);
-}
-static void data_source_offer(struct wl_client *client, struct wl_resource *resource, const char *mime_type) {
-	(void)client; (void)resource; (void)mime_type;
-}
-static void data_source_set_actions(struct wl_client *client, struct wl_resource *resource, uint32_t dnd_actions) {
-	(void)client; (void)resource; (void)dnd_actions;
+static owl_data_offer *create_data_offer(owl_display *display, struct wl_resource *device_resource,
+                                         owl_data_source *source) {
+	owl_data_offer *offer = calloc(1, sizeof(owl_data_offer));
+	if (!offer) return NULL;
+
+	offer->display = display;
+	offer->source = source;
+
+	uint32_t version = wl_resource_get_version(device_resource);
+	offer->resource = wl_resource_create(wl_resource_get_client(device_resource),
+		&wl_data_offer_interface, version, 0);
+	if (!offer->resource) {
+		free(offer);
+		return NULL;
+	}
+
+	wl_resource_set_implementation(offer->resource, &data_offer_impl, offer, data_offer_destroy_handler);
+
+	wl_data_device_send_data_offer(device_resource, offer->resource);
+
+	for (int i = 0; i < source->mime_type_count; i++) {
+		wl_data_offer_send_offer(offer->resource, source->mime_types[i]);
+	}
+
+	if (version >= WL_DATA_OFFER_SOURCE_ACTIONS_SINCE_VERSION && source->actions_set) {
+		wl_data_offer_send_source_actions(offer->resource, source->dnd_actions);
+	}
+
+	return offer;
 }
 
-static const struct wl_data_source_interface data_source_interface = {
-	.offer = data_source_offer,
-	.destroy = data_source_destroy,
-	.set_actions = data_source_set_actions,
-};
+static void data_device_destroy_handler(struct wl_resource *resource) {
+	owl_data_device *device = wl_resource_get_user_data(resource);
+	if (!device) return;
+	wl_list_remove(&device->link);
+	free(device);
+}
 
 static void data_device_start_drag(struct wl_client *client, struct wl_resource *resource,
-                                   struct wl_resource *source, struct wl_resource *origin,
-                                   struct wl_resource *icon, uint32_t serial) {
-	(void)client; (void)resource; (void)source; (void)origin; (void)icon; (void)serial;
-}
-static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
-                                      struct wl_resource *source, uint32_t serial) {
-	(void)client; (void)resource; (void)source; (void)serial;
-}
-static void data_device_release(struct wl_client *client, struct wl_resource *resource) {
-	(void)client; wl_resource_destroy(resource);
+                                   struct wl_resource *source_resource,
+                                   struct wl_resource *origin_resource,
+                                   struct wl_resource *icon_resource,
+                                   uint32_t serial) {
+	(void)client;
+	owl_data_device *device = wl_resource_get_user_data(resource);
+	if (!device) return;
+
+	owl_display *display = device->display;
+	owl_data_source *source = source_resource ? wl_resource_get_user_data(source_resource) : NULL;
+	owl_surface *origin = origin_resource ? owl_surface_from_resource(origin_resource) : NULL;
+	owl_surface *icon = icon_resource ? owl_surface_from_resource(icon_resource) : NULL;
+
+	owl_drag_start(display, source, origin, icon, serial);
 }
 
-static const struct wl_data_device_interface data_device_interface = {
+static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                      struct wl_resource *source_resource, uint32_t serial) {
+	(void)client;
+	owl_data_device *device = wl_resource_get_user_data(resource);
+	fprintf(stderr, "clipboard: set_selection device=%p source_resource=%p serial=%u\n",
+		(void*)device, (void*)source_resource, serial);
+	if (!device) return;
+
+	owl_display *display = device->display;
+	owl_data_source *source = source_resource ? wl_resource_get_user_data(source_resource) : NULL;
+	fprintf(stderr, "clipboard: source=%p (has %d mime types)\n",
+		(void*)source, source ? source->mime_type_count : 0);
+
+	if (display->clipboard_source && display->clipboard_source->resource) {
+		fprintf(stderr, "clipboard: cancelling old source\n");
+		wl_data_source_send_cancelled(display->clipboard_source->resource);
+	}
+
+	display->clipboard_source = source;
+	display->clipboard_serial = serial;
+
+	if (display->keyboard_focus) {
+		struct wl_client *focus_client = wl_resource_get_client(display->keyboard_focus->resource);
+		fprintf(stderr, "clipboard: sending offer to focused client %p\n", (void*)focus_client);
+		owl_selection_send_offer(display, focus_client);
+	} else {
+		fprintf(stderr, "clipboard: no keyboard focus, not sending offer\n");
+	}
+}
+
+static void data_device_release(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct wl_data_device_interface data_device_impl = {
 	.start_drag = data_device_start_drag,
 	.set_selection = data_device_set_selection,
 	.release = data_device_release,
@@ -790,45 +988,243 @@ static const struct wl_data_device_interface data_device_interface = {
 
 static void data_device_manager_create_data_source(struct wl_client *client,
                                                    struct wl_resource *resource, uint32_t id) {
-	struct wl_resource *source = wl_resource_create(client, &wl_data_source_interface, 3, id);
+	owl_display *display = wl_resource_get_user_data(resource);
+	fprintf(stderr, "clipboard: create_data_source client=%p\n", (void*)client);
+
+	owl_data_source *source = calloc(1, sizeof(owl_data_source));
 	if (!source) {
 		wl_resource_post_no_memory(resource);
 		return;
 	}
-	wl_resource_set_implementation(source, &data_source_interface, NULL, NULL);
+
+	source->display = display;
+	uint32_t version = wl_resource_get_version(resource);
+	source->resource = wl_resource_create(client, &wl_data_source_interface, version, id);
+	if (!source->resource) {
+		free(source);
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	wl_resource_set_implementation(source->resource, &data_source_impl, source, data_source_destroy_handler);
+	fprintf(stderr, "clipboard: data_source created %p\n", (void*)source);
 }
 
 static void data_device_manager_get_data_device(struct wl_client *client,
                                                 struct wl_resource *resource,
                                                 uint32_t id, struct wl_resource *seat) {
 	(void)seat;
-	struct wl_resource *device = wl_resource_create(client, &wl_data_device_interface, 3, id);
+	owl_display *display = wl_resource_get_user_data(resource);
+	fprintf(stderr, "clipboard: get_data_device client=%p\n", (void*)client);
+
+	owl_data_device *device = calloc(1, sizeof(owl_data_device));
 	if (!device) {
 		wl_resource_post_no_memory(resource);
 		return;
 	}
-	wl_resource_set_implementation(device, &data_device_interface, NULL, NULL);
+
+	device->display = display;
+	device->client = client;
+	uint32_t version = wl_resource_get_version(resource);
+	device->resource = wl_resource_create(client, &wl_data_device_interface, version, id);
+	if (!device->resource) {
+		free(device);
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	wl_resource_set_implementation(device->resource, &data_device_impl, device, data_device_destroy_handler);
+	wl_list_insert(&display->data_devices, &device->link);
+	fprintf(stderr, "clipboard: data_device created %p\n", (void*)device);
 }
 
-static const struct wl_data_device_manager_interface data_device_manager_interface = {
+static const struct wl_data_device_manager_interface data_device_manager_impl = {
 	.create_data_source = data_device_manager_create_data_source,
 	.get_data_device = data_device_manager_get_data_device,
 };
 
 static void data_device_manager_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
-	(void)data;
+	owl_display *display = data;
 	uint32_t bound_version = version < 3 ? version : 3;
+	fprintf(stderr, "clipboard: manager bind client=%p version=%u\n", (void*)client, bound_version);
 	struct wl_resource *resource = wl_resource_create(client, &wl_data_device_manager_interface,
 	                                                  bound_version, id);
 	if (!resource) {
 		wl_client_post_no_memory(client);
 		return;
 	}
-	wl_resource_set_implementation(resource, &data_device_manager_interface, NULL, NULL);
+	wl_resource_set_implementation(resource, &data_device_manager_impl, display, NULL);
+}
+
+void owl_selection_send_offer(owl_display *display, struct wl_client *client) {
+	fprintf(stderr, "clipboard: send_offer client=%p clipboard_source=%p\n",
+		(void*)client, (void*)display->clipboard_source);
+
+	if (!display->clipboard_source) {
+		fprintf(stderr, "clipboard: no source, sending NULL selection\n");
+		owl_data_device *dev;
+		wl_list_for_each(dev, &display->data_devices, link) {
+			if (dev->client == client) {
+				wl_data_device_send_selection(dev->resource, NULL);
+			}
+		}
+		return;
+	}
+
+	owl_data_device *dev;
+	int found = 0;
+	wl_list_for_each(dev, &display->data_devices, link) {
+		if (dev->client == client) {
+			found = 1;
+			fprintf(stderr, "clipboard: creating offer for device %p\n", (void*)dev);
+			owl_data_offer *offer = create_data_offer(display, dev->resource, display->clipboard_source);
+			if (offer) {
+				fprintf(stderr, "clipboard: sending selection offer %p\n", (void*)offer);
+				wl_data_device_send_selection(dev->resource, offer->resource);
+			} else {
+				fprintf(stderr, "clipboard: failed to create offer\n");
+			}
+		}
+	}
+	if (!found) {
+		fprintf(stderr, "clipboard: no data device found for client\n");
+	}
+}
+
+void owl_selection_init(owl_display *display) {
+	wl_list_init(&display->data_devices);
+	display->clipboard_source = NULL;
+}
+
+void owl_drag_start(owl_display *display, owl_data_source *source, owl_surface *origin,
+                    owl_surface *icon, uint32_t serial) {
+	if (display->current_drag.active) {
+		owl_drag_cancel(display);
+	}
+
+	display->current_drag.display = display;
+	display->current_drag.source = source;
+	display->current_drag.origin = origin;
+	display->current_drag.icon = icon;
+	display->current_drag.serial = serial;
+	display->current_drag.focus = NULL;
+	display->current_drag.offer = NULL;
+	display->current_drag.x = display->pointer_x;
+	display->current_drag.y = display->pointer_y;
+	display->current_drag.active = true;
+}
+
+void owl_drag_update(owl_display *display, double x, double y) {
+	if (!display->current_drag.active) return;
+
+	display->current_drag.x = x;
+	display->current_drag.y = y;
+
+	owl_surface *target = display->pointer_focus;
+
+	if (target != display->current_drag.focus) {
+		if (display->current_drag.focus && display->current_drag.offer) {
+			owl_data_device *dev;
+			wl_list_for_each(dev, &display->data_devices, link) {
+				if (dev->client == wl_resource_get_client(display->current_drag.focus->resource)) {
+					wl_data_device_send_leave(dev->resource);
+					break;
+				}
+			}
+		}
+
+		display->current_drag.focus = target;
+		display->current_drag.offer = NULL;
+
+		if (target && display->current_drag.source) {
+			struct wl_client *target_client = wl_resource_get_client(target->resource);
+			owl_data_device *dev;
+			wl_list_for_each(dev, &display->data_devices, link) {
+				if (dev->client == target_client) {
+					owl_data_offer *offer = create_data_offer(display, dev->resource,
+						display->current_drag.source);
+					if (offer) {
+						display->current_drag.offer = offer;
+						uint32_t serial = wl_display_next_serial(display->wayland_display);
+						wl_data_device_send_enter(dev->resource, serial,
+							target->resource, wl_fixed_from_double(x), wl_fixed_from_double(y),
+							offer->resource);
+					}
+					break;
+				}
+			}
+		}
+	} else if (target && display->current_drag.offer) {
+		owl_data_device *dev;
+		wl_list_for_each(dev, &display->data_devices, link) {
+			if (dev->client == wl_resource_get_client(target->resource)) {
+				uint32_t time = (uint32_t)(display->current_drag.x);
+				wl_data_device_send_motion(dev->resource, time,
+					wl_fixed_from_double(x), wl_fixed_from_double(y));
+				break;
+			}
+		}
+	}
+}
+
+void owl_drag_drop(owl_display *display) {
+	if (!display->current_drag.active) return;
+
+	if (display->current_drag.focus && display->current_drag.offer) {
+		struct wl_client *client = wl_resource_get_client(display->current_drag.focus->resource);
+		owl_data_device *dev;
+		wl_list_for_each(dev, &display->data_devices, link) {
+			if (dev->client == client) {
+				wl_data_device_send_drop(dev->resource);
+				break;
+			}
+		}
+
+		if (display->current_drag.source && display->current_drag.source->resource) {
+			wl_data_source_send_dnd_drop_performed(display->current_drag.source->resource);
+		}
+	} else {
+		owl_drag_cancel(display);
+		return;
+	}
+
+	display->current_drag.active = false;
+	display->current_drag.source = NULL;
+	display->current_drag.origin = NULL;
+	display->current_drag.icon = NULL;
+	display->current_drag.focus = NULL;
+	display->current_drag.offer = NULL;
+}
+
+void owl_drag_cancel(owl_display *display) {
+	if (!display->current_drag.active) return;
+
+	if (display->current_drag.focus) {
+		struct wl_client *client = wl_resource_get_client(display->current_drag.focus->resource);
+		owl_data_device *dev;
+		wl_list_for_each(dev, &display->data_devices, link) {
+			if (dev->client == client) {
+				wl_data_device_send_leave(dev->resource);
+				break;
+			}
+		}
+	}
+
+	if (display->current_drag.source && display->current_drag.source->resource) {
+		wl_data_source_send_cancelled(display->current_drag.source->resource);
+	}
+
+	display->current_drag.active = false;
+	display->current_drag.source = NULL;
+	display->current_drag.origin = NULL;
+	display->current_drag.icon = NULL;
+	display->current_drag.focus = NULL;
+	display->current_drag.offer = NULL;
 }
 
 void owl_surface_init(owl_display *display) {
 	wl_list_init(&display->surfaces);
+	owl_selection_init(display);
 
 	display->compositor_global = wl_global_create(display->wayland_display,
 		&wl_compositor_interface, 6, display, compositor_bind);
@@ -1542,6 +1938,8 @@ static void layer_shell_get_layer_surface(struct wl_client *client, struct wl_re
                                           uint32_t id, struct wl_resource *surface_resource,
                                           struct wl_resource *output_resource, uint32_t layer,
                                           const char *namespace) {
+	fprintf(stderr, "layer: get_layer_surface client=%p layer=%u ns=%s\n",
+		(void*)client, layer, namespace ? namespace : "(null)");
 	owl_display *display = wl_resource_get_user_data(resource);
 	owl_surface *wl_surface = owl_surface_from_resource(surface_resource);
 
@@ -1589,12 +1987,15 @@ static void layer_shell_get_layer_surface(struct wl_client *client, struct wl_re
 	}
 
 	wl_resource_set_implementation(ls->layer_surface_resource, &layer_surf_interface, ls, layer_surface_destroy_handler);
+	fprintf(stderr, "layer: resource created %p\n", (void*)ls);
 
 	if (display->layer_surface_count < OWL_MAX_LAYER_SURFACES) {
 		display->layer_surfaces[display->layer_surface_count++] = ls;
 	}
+	fprintf(stderr, "layer: added to list, count=%d\n", display->layer_surface_count);
 
 	owl_invoke_layer_surface_callback(display, OWL_LAYER_SURFACE_EVENT_CREATE, ls);
+	fprintf(stderr, "layer: callback invoked\n");
 	ls->initial_configure_sent = false;
 }
 
@@ -2321,6 +2722,513 @@ void owl_decoration_cleanup(owl_display *display) {
 }
 
 /* ==========================================================================
+ * Screencopy protocol
+ * ========================================================================== */
+
+static void screencopy_frame_destroy_handler(struct wl_resource *resource) {
+	owl_screencopy_frame *frame = wl_resource_get_user_data(resource);
+	if (!frame) return;
+
+	owl_display *display = frame->display;
+	for (int i = 0; i < display->screencopy_frame_count; i++) {
+		if (display->screencopy_frames[i] == frame) {
+			for (int j = i; j < display->screencopy_frame_count - 1; j++) {
+				display->screencopy_frames[j] = display->screencopy_frames[j + 1];
+			}
+			display->screencopy_frame_count--;
+			break;
+		}
+	}
+	free(frame);
+}
+
+static void screencopy_frame_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void screencopy_frame_copy(struct wl_client *client, struct wl_resource *resource,
+                                  struct wl_resource *buffer_resource) {
+	(void)client;
+	owl_screencopy_frame *frame = wl_resource_get_user_data(resource);
+	if (!frame) return;
+
+	if (frame->state != OWL_SCREENCOPY_FRAME_PENDING) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_ALREADY_USED,
+			"frame already used");
+		return;
+	}
+
+	owl_shm_buffer *buffer = wl_resource_get_user_data(buffer_resource);
+	if (!buffer || !buffer->pool || !buffer->pool->data) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER,
+			"invalid buffer");
+		return;
+	}
+
+	if (buffer->width != frame->width || buffer->height != frame->height) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER,
+			"buffer dimensions mismatch: expected %dx%d, got %dx%d",
+			frame->width, frame->height, buffer->width, buffer->height);
+		return;
+	}
+
+	frame->buffer = buffer;
+	frame->state = OWL_SCREENCOPY_FRAME_COPYING;
+	frame->with_damage = false;
+
+	// Trigger a render which will do the copy after rendering
+	if (frame->output) {
+		owl_render_frame(frame->display, frame->output);
+	}
+}
+
+static void screencopy_frame_copy_with_damage(struct wl_client *client, struct wl_resource *resource,
+                                               struct wl_resource *buffer_resource) {
+	(void)client;
+	owl_screencopy_frame *frame = wl_resource_get_user_data(resource);
+	if (!frame) return;
+
+	if (frame->state != OWL_SCREENCOPY_FRAME_PENDING) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_ALREADY_USED,
+			"frame already used");
+		return;
+	}
+
+	owl_shm_buffer *buffer = wl_resource_get_user_data(buffer_resource);
+	if (!buffer || !buffer->pool || !buffer->pool->data) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER,
+			"invalid buffer");
+		return;
+	}
+
+	if (buffer->width != frame->width || buffer->height != frame->height) {
+		wl_resource_post_error(resource, ZWLR_SCREENCOPY_FRAME_V1_ERROR_INVALID_BUFFER,
+			"buffer dimensions mismatch");
+		return;
+	}
+
+	frame->buffer = buffer;
+	frame->state = OWL_SCREENCOPY_FRAME_COPYING;
+	frame->with_damage = true;
+
+	// Trigger a render which will do the copy after rendering
+	if (frame->output) {
+		owl_render_frame(frame->display, frame->output);
+	}
+}
+
+static const struct zwlr_screencopy_frame_v1_interface screencopy_frame_impl = {
+	.copy = screencopy_frame_copy,
+	.destroy = screencopy_frame_destroy,
+	.copy_with_damage = screencopy_frame_copy_with_damage,
+};
+
+static owl_output *output_from_wl_output(owl_display *display, struct wl_resource *output_resource) {
+	for (int i = 0; i < display->output_count; i++) {
+		owl_output *output = display->outputs[i];
+		if (output->wl_output_global) {
+			return output;
+		}
+	}
+	return display->output_count > 0 ? display->outputs[0] : NULL;
+}
+
+static owl_screencopy_frame *create_screencopy_frame(owl_display *display, struct wl_client *client,
+                                                      uint32_t id, owl_output *output,
+                                                      int32_t x, int32_t y, int32_t w, int32_t h,
+                                                      bool overlay_cursor, uint32_t version) {
+	owl_screencopy_frame *frame = calloc(1, sizeof(owl_screencopy_frame));
+	if (!frame) return NULL;
+
+	frame->display = display;
+	frame->output = output;
+	frame->state = OWL_SCREENCOPY_FRAME_PENDING;
+	frame->x = x;
+	frame->y = y;
+	frame->width = w;
+	frame->height = h;
+	frame->overlay_cursor = overlay_cursor;
+
+	frame->resource = wl_resource_create(client, &zwlr_screencopy_frame_v1_interface, version, id);
+	if (!frame->resource) {
+		free(frame);
+		return NULL;
+	}
+
+	wl_resource_set_implementation(frame->resource, &screencopy_frame_impl, frame, screencopy_frame_destroy_handler);
+
+	if (display->screencopy_frame_count < OWL_MAX_SCREENCOPY_FRAMES) {
+		display->screencopy_frames[display->screencopy_frame_count++] = frame;
+	}
+
+	uint32_t stride = w * 4;
+	zwlr_screencopy_frame_v1_send_buffer(frame->resource, WL_SHM_FORMAT_XRGB8888, w, h, stride);
+	if (version >= 3) {
+		zwlr_screencopy_frame_v1_send_buffer_done(frame->resource);
+	}
+
+	return frame;
+}
+
+static void screencopy_manager_capture_output(struct wl_client *client, struct wl_resource *resource,
+                                               uint32_t frame_id, int32_t overlay_cursor,
+                                               struct wl_resource *output_resource) {
+	owl_display *display = wl_resource_get_user_data(resource);
+	owl_output *output = output_from_wl_output(display, output_resource);
+	uint32_t version = wl_resource_get_version(resource);
+
+	if (!output) {
+		struct wl_resource *frame_resource = wl_resource_create(client, &zwlr_screencopy_frame_v1_interface, version, frame_id);
+		if (frame_resource) {
+			wl_resource_set_implementation(frame_resource, &screencopy_frame_impl, NULL, NULL);
+			zwlr_screencopy_frame_v1_send_failed(frame_resource);
+		}
+		return;
+	}
+
+	owl_screencopy_frame *frame = create_screencopy_frame(display, client, frame_id, output,
+		0, 0, output->width, output->height, overlay_cursor != 0, version);
+
+	if (!frame) {
+		wl_resource_post_no_memory(resource);
+	}
+}
+
+static void screencopy_manager_capture_output_region(struct wl_client *client, struct wl_resource *resource,
+                                                      uint32_t frame_id, int32_t overlay_cursor,
+                                                      struct wl_resource *output_resource,
+                                                      int32_t x, int32_t y, int32_t w, int32_t h) {
+	owl_display *display = wl_resource_get_user_data(resource);
+	owl_output *output = output_from_wl_output(display, output_resource);
+	uint32_t version = wl_resource_get_version(resource);
+
+	if (!output) {
+		struct wl_resource *frame_resource = wl_resource_create(client, &zwlr_screencopy_frame_v1_interface, version, frame_id);
+		if (frame_resource) {
+			wl_resource_set_implementation(frame_resource, &screencopy_frame_impl, NULL, NULL);
+			zwlr_screencopy_frame_v1_send_failed(frame_resource);
+		}
+		return;
+	}
+
+	if (x < 0) x = 0;
+	if (y < 0) y = 0;
+	if (x + w > output->width) w = output->width - x;
+	if (y + h > output->height) h = output->height - y;
+	if (w <= 0 || h <= 0) {
+		struct wl_resource *frame_resource = wl_resource_create(client, &zwlr_screencopy_frame_v1_interface, version, frame_id);
+		if (frame_resource) {
+			wl_resource_set_implementation(frame_resource, &screencopy_frame_impl, NULL, NULL);
+			zwlr_screencopy_frame_v1_send_failed(frame_resource);
+		}
+		return;
+	}
+
+	owl_screencopy_frame *frame = create_screencopy_frame(display, client, frame_id, output,
+		x, y, w, h, overlay_cursor != 0, version);
+
+	if (!frame) {
+		wl_resource_post_no_memory(resource);
+	}
+}
+
+static void screencopy_manager_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct zwlr_screencopy_manager_v1_interface screencopy_manager_impl = {
+	.capture_output = screencopy_manager_capture_output,
+	.capture_output_region = screencopy_manager_capture_output_region,
+	.destroy = screencopy_manager_destroy,
+};
+
+static void screencopy_manager_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	uint32_t bound_version = version < 3 ? version : 3;
+
+	struct wl_resource *resource = wl_resource_create(client, &zwlr_screencopy_manager_v1_interface, bound_version, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+	wl_resource_set_implementation(resource, &screencopy_manager_impl, display, NULL);
+}
+
+void owl_screencopy_init(owl_display *display) {
+	display->screencopy_manager_global = wl_global_create(display->wayland_display,
+		&zwlr_screencopy_manager_v1_interface, 3, display, screencopy_manager_bind);
+
+	if (!display->screencopy_manager_global) {
+		fprintf(stderr, "owl: failed to create screencopy global\n");
+		return;
+	}
+	fprintf(stderr, "owl: screencopy initialized\n");
+}
+
+void owl_screencopy_cleanup(owl_display *display) {
+	if (display->screencopy_manager_global) {
+		wl_global_destroy(display->screencopy_manager_global);
+		display->screencopy_manager_global = NULL;
+	}
+}
+
+/* ==========================================================================
+ * Primary selection protocol
+ * ========================================================================== */
+
+static void primary_source_destroy_handler(struct wl_resource *resource) {
+	owl_primary_source *source = wl_resource_get_user_data(resource);
+	if (!source) return;
+
+	owl_display *display = source->display;
+	if (display->primary_source == source) {
+		display->primary_source = NULL;
+	}
+
+	for (int i = 0; i < source->mime_type_count; i++) {
+		free(source->mime_types[i]);
+	}
+	free(source);
+}
+
+static void primary_source_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void primary_source_offer(struct wl_client *client, struct wl_resource *resource,
+                                 const char *mime_type) {
+	(void)client;
+	owl_primary_source *source = wl_resource_get_user_data(resource);
+	if (!source || source->mime_type_count >= OWL_MAX_MIME_TYPES) return;
+
+	source->mime_types[source->mime_type_count++] = strdup(mime_type);
+}
+
+static const struct zwp_primary_selection_source_v1_interface primary_source_impl = {
+	.offer = primary_source_offer,
+	.destroy = primary_source_destroy,
+};
+
+static void primary_offer_destroy_handler(struct wl_resource *resource) {
+	owl_primary_offer *offer = wl_resource_get_user_data(resource);
+	free(offer);
+}
+
+static void primary_offer_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void primary_offer_receive(struct wl_client *client, struct wl_resource *resource,
+                                  const char *mime_type, int32_t fd) {
+	(void)client;
+	owl_primary_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer || !offer->source || !offer->source->resource) {
+		close(fd);
+		return;
+	}
+
+	zwp_primary_selection_source_v1_send_send(offer->source->resource, mime_type, fd);
+	close(fd);
+}
+
+static const struct zwp_primary_selection_offer_v1_interface primary_offer_impl = {
+	.receive = primary_offer_receive,
+	.destroy = primary_offer_destroy,
+};
+
+static owl_primary_offer *create_primary_offer(owl_display *display,
+                                                struct wl_resource *device_resource,
+                                                owl_primary_source *source) {
+	owl_primary_offer *offer = calloc(1, sizeof(owl_primary_offer));
+	if (!offer) return NULL;
+
+	offer->display = display;
+	offer->source = source;
+
+	uint32_t version = wl_resource_get_version(device_resource);
+	offer->resource = wl_resource_create(wl_resource_get_client(device_resource),
+		&zwp_primary_selection_offer_v1_interface, version, 0);
+	if (!offer->resource) {
+		free(offer);
+		return NULL;
+	}
+
+	wl_resource_set_implementation(offer->resource, &primary_offer_impl, offer,
+		primary_offer_destroy_handler);
+
+	zwp_primary_selection_device_v1_send_data_offer(device_resource, offer->resource);
+
+	for (int i = 0; i < source->mime_type_count; i++) {
+		zwp_primary_selection_offer_v1_send_offer(offer->resource, source->mime_types[i]);
+	}
+
+	return offer;
+}
+
+static void primary_device_destroy_handler(struct wl_resource *resource) {
+	owl_primary_device *device = wl_resource_get_user_data(resource);
+	if (!device) return;
+	wl_list_remove(&device->link);
+	free(device);
+}
+
+static void primary_device_set_selection(struct wl_client *client, struct wl_resource *resource,
+                                         struct wl_resource *source_resource, uint32_t serial) {
+	(void)client;
+	owl_primary_device *device = wl_resource_get_user_data(resource);
+	if (!device) return;
+
+	owl_display *display = device->display;
+	owl_primary_source *source = source_resource ? wl_resource_get_user_data(source_resource) : NULL;
+
+	if (display->primary_source && display->primary_source->resource) {
+		zwp_primary_selection_source_v1_send_cancelled(display->primary_source->resource);
+	}
+
+	display->primary_source = source;
+	display->primary_serial = serial;
+
+	if (display->keyboard_focus) {
+		struct wl_client *focus_client = wl_resource_get_client(display->keyboard_focus->resource);
+		owl_primary_send_offer(display, focus_client);
+	}
+}
+
+static void primary_device_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct zwp_primary_selection_device_v1_interface primary_device_impl = {
+	.set_selection = primary_device_set_selection,
+	.destroy = primary_device_destroy,
+};
+
+static void primary_manager_create_source(struct wl_client *client,
+                                          struct wl_resource *resource, uint32_t id) {
+	owl_display *display = wl_resource_get_user_data(resource);
+
+	owl_primary_source *source = calloc(1, sizeof(owl_primary_source));
+	if (!source) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	source->display = display;
+	uint32_t version = wl_resource_get_version(resource);
+	source->resource = wl_resource_create(client, &zwp_primary_selection_source_v1_interface,
+		version, id);
+	if (!source->resource) {
+		free(source);
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	wl_resource_set_implementation(source->resource, &primary_source_impl, source,
+		primary_source_destroy_handler);
+}
+
+static void primary_manager_get_device(struct wl_client *client,
+                                       struct wl_resource *resource,
+                                       uint32_t id, struct wl_resource *seat) {
+	(void)seat;
+	owl_display *display = wl_resource_get_user_data(resource);
+
+	owl_primary_device *device = calloc(1, sizeof(owl_primary_device));
+	if (!device) {
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	device->display = display;
+	device->client = client;
+	uint32_t version = wl_resource_get_version(resource);
+	device->resource = wl_resource_create(client, &zwp_primary_selection_device_v1_interface,
+		version, id);
+	if (!device->resource) {
+		free(device);
+		wl_resource_post_no_memory(resource);
+		return;
+	}
+
+	wl_resource_set_implementation(device->resource, &primary_device_impl, device,
+		primary_device_destroy_handler);
+	wl_list_insert(&display->primary_devices, &device->link);
+}
+
+static void primary_manager_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct zwp_primary_selection_device_manager_v1_interface primary_manager_impl = {
+	.create_source = primary_manager_create_source,
+	.get_device = primary_manager_get_device,
+	.destroy = primary_manager_destroy,
+};
+
+static void primary_manager_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	uint32_t bound_version = version < 1 ? version : 1;
+
+	struct wl_resource *resource = wl_resource_create(client,
+		&zwp_primary_selection_device_manager_v1_interface, bound_version, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+	wl_resource_set_implementation(resource, &primary_manager_impl, display, NULL);
+}
+
+void owl_primary_send_offer(owl_display *display, struct wl_client *client) {
+	if (!display->primary_source) {
+		owl_primary_device *dev;
+		wl_list_for_each(dev, &display->primary_devices, link) {
+			if (dev->client == client) {
+				zwp_primary_selection_device_v1_send_selection(dev->resource, NULL);
+			}
+		}
+		return;
+	}
+
+	owl_primary_device *dev;
+	wl_list_for_each(dev, &display->primary_devices, link) {
+		if (dev->client == client) {
+			owl_primary_offer *offer = create_primary_offer(display, dev->resource,
+				display->primary_source);
+			if (offer) {
+				zwp_primary_selection_device_v1_send_selection(dev->resource, offer->resource);
+			}
+		}
+	}
+}
+
+void owl_primary_selection_init(owl_display *display) {
+	wl_list_init(&display->primary_devices);
+	display->primary_source = NULL;
+
+	display->primary_selection_manager_global = wl_global_create(display->wayland_display,
+		&zwp_primary_selection_device_manager_v1_interface, 1, display, primary_manager_bind);
+
+	if (!display->primary_selection_manager_global) {
+		fprintf(stderr, "owl: failed to create primary selection global\n");
+		return;
+	}
+	fprintf(stderr, "owl: primary selection initialized\n");
+}
+
+void owl_primary_selection_cleanup(owl_display *display) {
+	if (display->primary_selection_manager_global) {
+		wl_global_destroy(display->primary_selection_manager_global);
+		display->primary_selection_manager_global = NULL;
+	}
+}
+
+/* ==========================================================================
  * Display lifecycle
  * ========================================================================== */
 
@@ -2521,6 +3429,8 @@ owl_display *owl_display_create(void) {
 	owl_decoration_init(display);
 	owl_layer_shell_init(display);
 	owl_workspace_init(display);
+	owl_screencopy_init(display);
+	owl_primary_selection_init(display);
 	owl_render_init(display);
 
 	wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
@@ -2534,6 +3444,8 @@ void owl_display_destroy(owl_display *display) {
 	if (!display) return;
 
 	owl_render_cleanup(display);
+	owl_primary_selection_cleanup(display);
+	owl_screencopy_cleanup(display);
 	owl_workspace_cleanup(display);
 	owl_layer_shell_cleanup(display);
 	owl_decoration_cleanup(display);

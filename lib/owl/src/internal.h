@@ -96,6 +96,84 @@ typedef struct {
 	void *data;
 } gesture_callback_entry;
 
+typedef enum {
+	OWL_SCREENCOPY_FRAME_PENDING,
+	OWL_SCREENCOPY_FRAME_COPYING,
+	OWL_SCREENCOPY_FRAME_FAILED,
+} owl_screencopy_frame_state;
+
+typedef struct owl_screencopy_frame {
+	owl_display *display;
+	struct wl_resource *resource;
+	owl_output *output;
+	owl_screencopy_frame_state state;
+	int32_t x, y, width, height;
+	bool overlay_cursor;
+	bool with_damage;
+	owl_shm_buffer *buffer;
+} owl_screencopy_frame;
+
+#define OWL_MAX_SCREENCOPY_FRAMES 16
+#define OWL_MAX_MIME_TYPES 32
+
+typedef struct owl_data_source {
+	owl_display *display;
+	struct wl_resource *resource;
+	char *mime_types[OWL_MAX_MIME_TYPES];
+	int mime_type_count;
+	uint32_t dnd_actions;
+	uint32_t current_dnd_action;
+	bool actions_set;
+} owl_data_source;
+
+typedef struct owl_data_offer {
+	owl_display *display;
+	struct wl_resource *resource;
+	owl_data_source *source;
+	uint32_t dnd_actions;
+	uint32_t preferred_dnd_action;
+	bool in_ask;
+} owl_data_offer;
+
+typedef struct owl_primary_source {
+	owl_display *display;
+	struct wl_resource *resource;
+	char *mime_types[OWL_MAX_MIME_TYPES];
+	int mime_type_count;
+} owl_primary_source;
+
+typedef struct owl_primary_offer {
+	owl_display *display;
+	struct wl_resource *resource;
+	owl_primary_source *source;
+} owl_primary_offer;
+
+typedef struct owl_drag {
+	owl_display *display;
+	owl_data_source *source;
+	owl_surface *origin;
+	owl_surface *icon;
+	owl_surface *focus;
+	owl_data_offer *offer;
+	uint32_t serial;
+	double x, y;
+	bool active;
+} owl_drag;
+
+typedef struct owl_data_device {
+	owl_display *display;
+	struct wl_resource *resource;
+	struct wl_client *client;
+	struct wl_list link;
+} owl_data_device;
+
+typedef struct owl_primary_device {
+	owl_display *display;
+	struct wl_resource *resource;
+	struct wl_client *client;
+	struct wl_list link;
+} owl_primary_device;
+
 struct owl_display {
 	struct wl_display *wayland_display;
 	struct wl_event_loop *event_loop;
@@ -175,6 +253,21 @@ struct owl_display {
 
 	owl_render_callback render_callback;
 	void *render_callback_data;
+
+	struct wl_global *screencopy_manager_global;
+	owl_screencopy_frame *screencopy_frames[OWL_MAX_SCREENCOPY_FRAMES];
+	int screencopy_frame_count;
+
+	struct wl_list data_devices;
+	owl_data_source *clipboard_source;
+	uint32_t clipboard_serial;
+
+	struct wl_global *primary_selection_manager_global;
+	struct wl_list primary_devices;
+	owl_primary_source *primary_source;
+	uint32_t primary_serial;
+
+	owl_drag current_drag;
 };
 
 /* Internal functions */
@@ -230,5 +323,20 @@ void owl_decoration_init(owl_display *display);
 void owl_decoration_cleanup(owl_display *display);
 
 void owl_invoke_gesture_callback(owl_display *display, owl_gesture_event type, owl_gesture *gesture);
+
+void owl_screencopy_init(owl_display *display);
+void owl_screencopy_cleanup(owl_display *display);
+void owl_screencopy_do_copy(owl_screencopy_frame *frame);
+
+void owl_selection_init(owl_display *display);
+void owl_selection_send_offer(owl_display *display, struct wl_client *client);
+void owl_primary_selection_init(owl_display *display);
+void owl_primary_selection_cleanup(owl_display *display);
+void owl_primary_send_offer(owl_display *display, struct wl_client *client);
+void owl_drag_start(owl_display *display, owl_data_source *source, owl_surface *origin,
+                    owl_surface *icon, uint32_t serial);
+void owl_drag_update(owl_display *display, double x, double y);
+void owl_drag_drop(owl_display *display);
+void owl_drag_cancel(owl_display *display);
 
 #endif

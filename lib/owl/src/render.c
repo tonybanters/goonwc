@@ -2,6 +2,7 @@
 #include "internal.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
@@ -10,6 +11,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <wayland-server-protocol.h>
+#include "wlr-screencopy-unstable-v1-protocol.h"
 
 #ifndef GL_BGRA_EXT
 #define GL_BGRA_EXT 0x80E1
@@ -434,6 +436,14 @@ void owl_render_frame(owl_display *display, owl_output *output) {
 
     glDisable(GL_BLEND);
 
+    // Process pending screencopy frames after rendering, before swap
+    for (int i = 0; i < display->screencopy_frame_count; i++) {
+        owl_screencopy_frame *frame = display->screencopy_frames[i];
+        if (frame && frame->state == OWL_SCREENCOPY_FRAME_COPYING && frame->output == output) {
+            owl_screencopy_do_copy(frame);
+        }
+    }
+
     if (!eglSwapBuffers(display->egl_display, output->egl_surface)) {
         fprintf(stderr, "owl: failed to swap buffers\n");
         return;
@@ -483,4 +493,70 @@ void owl_set_render_callback(owl_display *display, owl_render_callback callback,
     if (!display) return;
     display->render_callback = callback;
     display->render_callback_data = data;
+}
+
+void owl_screencopy_do_copy(owl_screencopy_frame *frame) {
+    if (!frame || !frame->buffer || !frame->output || !frame->display) {
+        if (frame && frame->resource) {
+            zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        }
+        return;
+    }
+
+    owl_display *display = frame->display;
+    owl_output *output = frame->output;
+    owl_shm_buffer *buffer = frame->buffer;
+
+    if (!buffer->pool || !buffer->pool->data) {
+        zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        return;
+    }
+
+    uint32_t expected_stride = frame->width * 4;
+    if ((uint32_t)buffer->stride != expected_stride) {
+        zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        return;
+    }
+
+    size_t required_size = (size_t)buffer->stride * buffer->height;
+    if (buffer->offset + required_size > (size_t)buffer->pool->size) {
+        zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        return;
+    }
+
+    if (!eglMakeCurrent(display->egl_display, output->egl_surface,
+                        output->egl_surface, display->egl_context)) {
+        zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        return;
+    }
+
+    void *dst = (char *)buffer->pool->data + buffer->offset;
+    int gl_y = output->height - frame->y - frame->height;
+
+#ifndef GL_BGRA_EXT
+#define GL_BGRA_EXT 0x80E1
+#endif
+    glReadPixels(frame->x, gl_y, frame->width, frame->height,
+                 GL_BGRA_EXT, GL_UNSIGNED_BYTE, dst);
+
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        fprintf(stderr, "owl: glReadPixels failed: 0x%x\n", err);
+        zwlr_screencopy_frame_v1_send_failed(frame->resource);
+        return;
+    }
+
+    // Mark as done so it's not processed again
+    frame->state = OWL_SCREENCOPY_FRAME_PENDING;
+    frame->buffer = NULL;
+
+    zwlr_screencopy_frame_v1_send_flags(frame->resource, ZWLR_SCREENCOPY_FRAME_V1_FLAGS_Y_INVERT);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    uint32_t tv_sec_hi = (uint32_t)(ts.tv_sec >> 32);
+    uint32_t tv_sec_lo = (uint32_t)(ts.tv_sec & 0xFFFFFFFF);
+    uint32_t tv_nsec = (uint32_t)ts.tv_nsec;
+
+    zwlr_screencopy_frame_v1_send_ready(frame->resource, tv_sec_hi, tv_sec_lo, tv_nsec);
 }
