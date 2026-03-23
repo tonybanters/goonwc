@@ -58,6 +58,17 @@ static void debug(const char *fmt, ...) {
 }
 
 /* ==========================================================================
+ * Signal handling
+ * ========================================================================== */
+
+static int handle_signal(int signal_number, void *data) {
+	owl_display *display = data;
+	fprintf(stderr, "owl: received signal %d, shutting down\n", signal_number);
+	owl_display_terminate(display);
+	return 0;
+}
+
+/* ==========================================================================
  * Callbacks
  * ========================================================================== */
 
@@ -3394,6 +3405,10 @@ owl_display *owl_display_create(void) {
 	fprintf(stderr, "owl: listening on %s\n", display->socket_name);
 
 	display->event_loop = wl_display_get_event_loop(display->wayland_display);
+
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
+	wl_event_loop_add_signal(display->event_loop, SIGTERM, handle_signal, display);
 
 	display->drm_fd = open_drm_device();
 	if (display->drm_fd < 0) {
