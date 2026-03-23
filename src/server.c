@@ -141,11 +141,10 @@ static int count_tiled(dwc_server *server) {
 
 /**
  * arrange() - scroll layout. windows arranged horizontally in a strip.
- * scrolls just enough to keep focused window visible 
  * @server: dwc server
+ * @adjust_scroll: if true, scroll to keep focused window visible
  */
-void arrange(dwc_server *server) {
-    /* todo: make this function take in a layout, and arranged based on the passed in layout.) */
+void arrange_internal(dwc_server *server, bool adjust_scroll) {
 	rect area = get_usable_area(server);
 	if (area.w <= 0 || area.h <= 0) return;
 
@@ -220,8 +219,7 @@ void arrange(dwc_server *server) {
 		}
 	}
 
-	/* adjust scroll only if focused window is outside viewport (skip during gesture) */
-	if (!server->gesture_active) {
+	if (adjust_scroll && !server->gesture_active) {
 		int view_left = server->scroll_offset;
 		int view_right = server->scroll_offset + area.w;
 
@@ -231,7 +229,6 @@ void arrange(dwc_server *server) {
 			server->scroll_offset = focused_right - area.w + g;
 		}
 
-		/* clamp scroll offset - don't scroll past start */
 		if (server->scroll_offset < 0) {
 			server->scroll_offset = 0;
 		}
@@ -248,6 +245,10 @@ void arrange(dwc_server *server) {
 		owl_window_resize(t->window, win_width, win_height);
 		pos += win_width + g;
 	}
+}
+
+void arrange(dwc_server *server) {
+	arrange_internal(server, true);
 }
 
 /* keybinding action functions */
@@ -454,7 +455,7 @@ static void on_window_destroy(owl_display *display, owl_window *window, void *da
 	dwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
 		toplevel_destroy(toplevel);
-		arrange(server);
+		arrange_internal(server, false);
 	}
 }
 
@@ -731,6 +732,44 @@ void server_cleanup(dwc_server *server) {
 	owl_display_destroy(server->display);
 }
 
+static int focus_stack_remove(dwc_server *server, dwc_toplevel *toplevel) {
+	for (int i = 0; i < server->focus_stack_len; i++) {
+		if (server->focus_stack[i].toplevel == toplevel) {
+			int saved_scroll = server->focus_stack[i].scroll_offset;
+			memmove(&server->focus_stack[i], &server->focus_stack[i + 1],
+			        (server->focus_stack_len - i - 1) * sizeof(dwc_focus_entry));
+			server->focus_stack_len--;
+			return saved_scroll;
+		}
+	}
+	return server->scroll_offset;
+}
+
+static void focus_stack_push(dwc_server *server, dwc_toplevel *toplevel) {
+	focus_stack_remove(server, toplevel);
+
+	if (server->focus_stack_len >= DWC_FOCUS_STACK_SIZE) {
+		memmove(&server->focus_stack[0], &server->focus_stack[1],
+		        (DWC_FOCUS_STACK_SIZE - 1) * sizeof(dwc_focus_entry));
+		server->focus_stack_len = DWC_FOCUS_STACK_SIZE - 1;
+	}
+
+	server->focus_stack[server->focus_stack_len++] = (dwc_focus_entry){
+		.toplevel = toplevel,
+		.scroll_offset = server->scroll_offset,
+	};
+}
+
+static dwc_focus_entry *focus_stack_get_previous(dwc_server *server) {
+	for (int i = server->focus_stack_len - 1; i >= 0; i--) {
+		dwc_focus_entry *entry = &server->focus_stack[i];
+		if (entry->toplevel && is_visible(entry->toplevel)) {
+			return entry;
+		}
+	}
+	return NULL;
+}
+
 dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
 	dwc_toplevel *toplevel = calloc(1, sizeof(dwc_toplevel));
 	if (!toplevel) {
@@ -773,16 +812,15 @@ void toplevel_destroy(dwc_toplevel *toplevel) {
 
 	dwc_server *server = toplevel->server;
 
+	int saved_scroll = focus_stack_remove(server, toplevel);
+
 	if (server->focused_tiled == toplevel) {
 		server->focused_tiled = NULL;
-		/* focus next visible window */
-		dwc_toplevel *t;
-		for (t = server->toplevels; t; t = t->next) {
-			if (t != toplevel && is_visible(t)) {
-				server->focused_tiled = t;
-				owl_window_focus(t->window);
-				break;
-			}
+		dwc_focus_entry *entry = focus_stack_get_previous(server);
+		if (entry) {
+			server->focused_tiled = entry->toplevel;
+			server->scroll_offset = saved_scroll;
+			owl_window_focus(entry->toplevel->window);
 		}
 	}
 	if (server->grabbed_tiled == toplevel) {
@@ -814,6 +852,7 @@ void toplevel_focus(dwc_toplevel *toplevel) {
 	}
 
 	server->focused_tiled = toplevel;
+	focus_stack_push(server, toplevel);
 	owl_window_focus(toplevel->window);
 }
 

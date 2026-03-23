@@ -34,6 +34,13 @@ typedef struct {
 #define DWC_PRESET_COUNT 3
 static const float dwc_width_presets[DWC_PRESET_COUNT] = { 1.0f/3.0f, 0.5f, 2.0f/3.0f };
 
+#define DWC_FOCUS_STACK_SIZE 64
+
+typedef struct {
+	dwc_toplevel *toplevel;
+	int scroll_offset;
+} dwc_focus_entry;
+
 /* tiled window in scroll strip */
 struct dwc_toplevel {
 	dwc_server *server;
@@ -88,6 +95,9 @@ struct dwc_server {
 	int grab_width, grab_height;
 	int grab_pos_x, grab_pos_y;
 	uint32_t resize_edges;
+
+	dwc_focus_entry focus_stack[DWC_FOCUS_STACK_SIZE];
+	int focus_stack_len;
 };
 
 #endif
