@@ -172,17 +172,8 @@ void arrange_internal(dwc_server *server, bool adjust_scroll) {
 
 	int win_height = area.h - 2 * g;
 
-	/* single window: smart gaps (no gaps), fill usable area */
 	if (n == 1) {
 		server->scroll_offset = 0;
-		for (t = server->toplevels; t; t = t->next) {
-			if (!is_tiled(t)) continue;
-			owl_window_set_tiled(t->window, true);
-			owl_window_move(t->window, area.x, area.y);
-            /* todo: for smart gaps, should we always fullscreen 1 window? */
-			owl_window_resize(t->window, area.w, area.h);
-			return;
-		}
 	}
 
 	/*
@@ -587,6 +578,8 @@ static void on_gesture_begin(owl_display *display, owl_gesture *gesture, void *d
 
 	if (gesture->fingers == 3) {
 		server->gesture_active = true;
+		server->gesture_start_offset = server->scroll_offset;
+		server->gesture_start_focused = server->focused_tiled;
 	}
 }
 
@@ -629,30 +622,82 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 
 		rect area = get_usable_area(server);
 		int g = gap;
-		int view_center = server->scroll_offset + area.w / 2;
 
-		dwc_toplevel *best = NULL;
-		int best_dist = INT_MAX;
-		int pos = g;
+		dwc_toplevel *start_focused = server->gesture_start_focused;
+		if (!start_focused || !is_tiled(start_focused)) {
+			arrange(server);
+			return;
+		}
 
+		int swipe_distance = server->scroll_offset - server->gesture_start_offset;
+		bool swiped_right = swipe_distance > 0;
+		bool swiped_left = swipe_distance < 0;
+
+		dwc_toplevel *neighbor = NULL;
+		if (swiped_right) {
+			for (dwc_toplevel *t = start_focused->next; t; t = t->next) {
+				if (is_tiled(t)) {
+					neighbor = t;
+					break;
+				}
+			}
+		} else if (swiped_left) {
+			for (dwc_toplevel *t = start_focused->prev; t; t = t->prev) {
+				if (is_tiled(t)) {
+					neighbor = t;
+					break;
+				}
+			}
+		}
+
+		if (!neighbor) {
+			server->scroll_offset = server->gesture_start_offset;
+			arrange_internal(server, false);
+			return;
+		}
+
+		int neighbor_width = get_win_width(area.w, g, neighbor->width);
+
+		int neighbor_strip_pos = g;
 		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (!is_tiled(t)) continue;
-			int win_width = get_win_width(area.w, g, t->width);
-			int win_center = pos + win_width / 2;
-			int dist = abs(win_center - view_center);
-			if (dist < best_dist) {
-				best_dist = dist;
-				best = t;
+			if (t == neighbor) break;
+			neighbor_strip_pos += get_win_width(area.w, g, t->width) + g;
+		}
+
+		int neighbor_screen_left = neighbor_strip_pos - server->gesture_start_offset;
+		int neighbor_screen_right = neighbor_screen_left + neighbor_width;
+		bool neighbor_was_visible = (neighbor_screen_left >= 0) && (neighbor_screen_right <= area.w);
+
+		if (neighbor_was_visible) {
+			server->focused_tiled = neighbor;
+			owl_window_focus(neighbor->window);
+			server->scroll_offset = server->gesture_start_offset;
+		} else {
+			int abs_swipe = abs(swipe_distance);
+			int focused_width = get_win_width(area.w, g, start_focused->width);
+			int threshold_width = (neighbor_width < focused_width) ? neighbor_width : focused_width;
+			bool crossed_threshold = abs_swipe >= (threshold_width / 2);
+
+			if (crossed_threshold) {
+				server->focused_tiled = neighbor;
+				owl_window_focus(neighbor->window);
+
+				if (swiped_right) {
+					server->scroll_offset = neighbor_strip_pos + neighbor_width - area.w;
+				} else {
+					server->scroll_offset = neighbor_strip_pos - g;
+				}
+			} else {
+				server->scroll_offset = server->gesture_start_offset;
 			}
-			pos += win_width + g;
 		}
 
-		if (best && best != server->focused_tiled) {
-			server->focused_tiled = best;
-			owl_window_focus(best->window);
+		if (server->scroll_offset < 0) {
+			server->scroll_offset = 0;
 		}
 
-		arrange(server);
+		arrange_internal(server, false);
 	}
 }
 

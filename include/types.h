@@ -85,6 +85,8 @@ struct dwc_server {
 	unsigned int tagset;
 	int scroll_offset;
 	bool gesture_active;
+	int gesture_start_offset;
+	dwc_toplevel *gesture_start_focused;
 
 	owl_workspace *workspaces[9];
 
