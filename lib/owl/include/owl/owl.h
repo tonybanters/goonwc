@@ -239,6 +239,8 @@ void owl_display_get_pointer(owl_display *display, int *x, int *y);
 owl_window **owl_display_get_windows(owl_display *display, int *count);
 owl_output **owl_display_get_outputs(owl_display *display, int *count);
 owl_layer_surface **owl_display_get_layer_surfaces(owl_display *display, int *count);
+struct wl_event_loop *owl_display_get_event_loop(owl_display *display);
+void owl_display_request_frame(owl_display *display);
 
 /* Window actions - these actually do things */
 void owl_window_focus(owl_window *window);

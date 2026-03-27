@@ -7,11 +7,71 @@
 #include <limits.h>
 #include <time.h>
 #include <math.h>
+#include <wayland-server-core.h>
+
+void arrange_internal(dwc_server *server, bool adjust_scroll);
 
 static uint64_t get_time_ms(void) {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
+#define SPRING_STIFFNESS 800.0
+#define SPRING_DAMPING_RATIO 1.0
+#define SPRING_EPSILON 0.5
+
+static double spring_calc(dwc_scroll_anim *anim, double t) {
+	double stiffness = SPRING_STIFFNESS;
+	double beta = SPRING_DAMPING_RATIO * sqrt(stiffness);
+	double x0 = anim->from - anim->to;
+	double v0 = anim->velocity;
+	return anim->to + exp(-beta * t) * (x0 + (beta * x0 + v0) * t);
+}
+
+static int anim_tick(void *data);
+
+static void anim_start(dwc_server *server, double from, double to, double velocity) {
+	server->scroll_anim = (dwc_scroll_anim){
+		.active = true,
+		.from = from,
+		.to = to,
+		.velocity = velocity,
+		.start_time_ms = get_time_ms(),
+	};
+	if (!server->anim_timer) {
+		struct wl_event_loop *loop = owl_display_get_event_loop(server->display);
+		server->anim_timer = wl_event_loop_add_timer(loop, anim_tick, server);
+	}
+	wl_event_source_timer_update(server->anim_timer, 16);
+}
+
+static void anim_stop(dwc_server *server) {
+	server->scroll_anim.active = false;
+	if (server->anim_timer) {
+		wl_event_source_timer_update(server->anim_timer, 0);
+	}
+}
+
+static int anim_tick(void *data) {
+	dwc_server *server = data;
+	if (!server->scroll_anim.active) return 0;
+
+	double t = (get_time_ms() - server->scroll_anim.start_time_ms) / 1000.0;
+	double pos = spring_calc(&server->scroll_anim, t);
+	double diff = fabs(pos - server->scroll_anim.to);
+
+	if (diff < SPRING_EPSILON) {
+		server->scroll_offset = (int)server->scroll_anim.to;
+		anim_stop(server);
+	} else {
+		server->scroll_offset = (int)pos;
+		wl_event_source_timer_update(server->anim_timer, 16);
+	}
+
+	arrange_internal(server, false);
+	owl_display_request_frame(server->display);
+	return 0;
 }
 
 /* global server pointer for keybinding functions */
@@ -667,11 +727,6 @@ static double calculate_gesture_velocity(dwc_server *server) {
 
 #define DECELERATION_TOUCHPAD 0.997
 
-static double calculate_projected_end(dwc_server *server, double velocity) {
-	double decel_factor = 1000.0 * log(DECELERATION_TOUCHPAD);
-	return server->gesture_cumulative_dx - (velocity / decel_factor);
-}
-
 static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *data) {
 	(void)display;
 	dwc_server *server = data;
@@ -681,85 +736,43 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 
 		rect area = get_usable_area(server);
 		int g = gap;
+		double velocity = calculate_gesture_velocity(server);
 
-		dwc_toplevel *start_focused = server->gesture_start_focused;
-		if (!start_focused || !is_tiled(start_focused)) {
+		double decel = 1000.0 * log(DECELERATION_TOUCHPAD);
+		double projected_offset = server->scroll_offset - (velocity / decel);
+
+		dwc_toplevel *best = NULL;
+		double best_snap = 0;
+		double best_dist = 1e9;
+		int pos = g;
+
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+			if (!is_tiled(t)) continue;
+
+			int w = get_win_width(area.w, g, t->width);
+			double snap = pos - g;
+
+			double dist = fabs(snap - projected_offset);
+			if (dist < best_dist) {
+				best_dist = dist;
+				best_snap = snap;
+				best = t;
+			}
+
+			pos += w + g;
+		}
+
+		if (!best) {
 			arrange(server);
 			return;
 		}
 
-		double velocity = calculate_gesture_velocity(server);
-		double projected_end = calculate_projected_end(server, velocity);
-		int projected_distance = (int)projected_end;
+		if (best_snap < 0) best_snap = 0;
 
-		bool swiped_right = projected_distance > 0;
-		bool swiped_left = projected_distance < 0;
+		server->focused_tiled = best;
+		owl_window_focus(best->window);
 
-		dwc_toplevel *neighbor = NULL;
-		if (swiped_right) {
-			for (dwc_toplevel *t = start_focused->next; t; t = t->next) {
-				if (is_tiled(t)) {
-					neighbor = t;
-					break;
-				}
-			}
-		} else if (swiped_left) {
-			for (dwc_toplevel *t = start_focused->prev; t; t = t->prev) {
-				if (is_tiled(t)) {
-					neighbor = t;
-					break;
-				}
-			}
-		}
-
-		if (!neighbor) {
-			server->scroll_offset = server->gesture_start_offset;
-			arrange_internal(server, false);
-			return;
-		}
-
-		int neighbor_width = get_win_width(area.w, g, neighbor->width);
-
-		int neighbor_strip_pos = g;
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
-			if (!is_tiled(t)) continue;
-			if (t == neighbor) break;
-			neighbor_strip_pos += get_win_width(area.w, g, t->width) + g;
-		}
-
-		int neighbor_screen_left = neighbor_strip_pos - server->gesture_start_offset;
-		int neighbor_screen_right = neighbor_screen_left + neighbor_width;
-		bool neighbor_was_visible = (neighbor_screen_left >= 0) && (neighbor_screen_right <= area.w);
-
-		if (neighbor_was_visible) {
-			server->focused_tiled = neighbor;
-			owl_window_focus(neighbor->window);
-			server->scroll_offset = server->gesture_start_offset;
-		} else {
-			int abs_projected = abs(projected_distance);
-			int focused_width = get_win_width(area.w, g, start_focused->width);
-			int threshold_width = (neighbor_width < focused_width) ? neighbor_width : focused_width;
-			bool crossed_threshold = abs_projected >= (threshold_width / 2);
-
-			if (crossed_threshold) {
-				server->focused_tiled = neighbor;
-				owl_window_focus(neighbor->window);
-
-				if (swiped_right) {
-					server->scroll_offset = neighbor_strip_pos + neighbor_width - area.w;
-				} else {
-					server->scroll_offset = neighbor_strip_pos - g;
-				}
-			} else {
-				server->scroll_offset = server->gesture_start_offset;
-			}
-		}
-
-		if (server->scroll_offset < 0) {
-			server->scroll_offset = 0;
-		}
-
-		arrange_internal(server, false);
+		anim_start(server, server->scroll_offset, best_snap, velocity);
 	}
 }
 

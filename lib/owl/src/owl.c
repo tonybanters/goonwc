@@ -2064,6 +2064,17 @@ owl_layer_surface **owl_display_get_layer_surfaces(owl_display *display, int *co
 	return display->layer_surfaces;
 }
 
+struct wl_event_loop *owl_display_get_event_loop(owl_display *display) {
+	return display ? display->event_loop : NULL;
+}
+
+void owl_display_request_frame(owl_display *display) {
+	if (!display) return;
+	for (int i = 0; i < display->output_count; i++) {
+		owl_render_frame(display, display->outputs[i]);
+	}
+}
+
 /* ==========================================================================
  * Output protocol
  * ========================================================================== */

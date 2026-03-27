@@ -50,6 +50,14 @@ typedef struct {
 	int scroll_offset;
 } dwc_focus_entry;
 
+typedef struct {
+	bool active;
+	double from;
+	double to;
+	double velocity;
+	uint64_t start_time_ms;
+} dwc_scroll_anim;
+
 /* tiled window in scroll strip */
 struct dwc_toplevel {
 	dwc_server *server;
@@ -99,6 +107,9 @@ struct dwc_server {
 	double gesture_cumulative_dx;
 	dwc_gesture_event gesture_history[DWC_GESTURE_HISTORY_SIZE];
 	int gesture_history_len;
+
+	dwc_scroll_anim scroll_anim;
+	struct wl_event_source *anim_timer;
 
 	owl_workspace *workspaces[9];
 
