@@ -5,6 +5,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <limits.h>
+#include <time.h>
+#include <math.h>
+
+static uint64_t get_time_ms(void) {
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
 
 /* global server pointer for keybinding functions */
 dwc_server *g_server = NULL;
@@ -580,6 +588,8 @@ static void on_gesture_begin(owl_display *display, owl_gesture *gesture, void *d
 		server->gesture_active = true;
 		server->gesture_start_offset = server->scroll_offset;
 		server->gesture_start_focused = server->focused_tiled;
+		server->gesture_cumulative_dx = 0;
+		server->gesture_history_len = 0;
 	}
 }
 
@@ -587,12 +597,10 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 	(void)display;
 	dwc_server *server = data;
 
-	/* 3-finger horizontal swipe scrolls the strip */
 	if (gesture->fingers == 3) {
 		rect area = get_usable_area(server);
 		int g = gap;
 
-		/* calculate total strip width */
 		int total_width = g;
 		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_tiled(t)) {
@@ -600,10 +608,25 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 			}
 		}
 
-		/* niri-style: positive dx = scroll view right */
 		server->scroll_offset += (int)(gesture->dx * 2.0);
+		server->gesture_cumulative_dx += gesture->dx * 2.0;
 
-		/* niri-style bounds: allow overscroll by full screen width */
+		uint64_t now = get_time_ms();
+
+		if (server->gesture_history_len < DWC_GESTURE_HISTORY_SIZE) {
+			server->gesture_history[server->gesture_history_len++] = (dwc_gesture_event){
+				.dx = gesture->dx * 2.0,
+				.timestamp_ms = now,
+			};
+		} else {
+			memmove(&server->gesture_history[0], &server->gesture_history[1],
+			        (DWC_GESTURE_HISTORY_SIZE - 1) * sizeof(dwc_gesture_event));
+			server->gesture_history[DWC_GESTURE_HISTORY_SIZE - 1] = (dwc_gesture_event){
+				.dx = gesture->dx * 2.0,
+				.timestamp_ms = now,
+			};
+		}
+
 		int min_scroll = -area.w;
 		int max_scroll = total_width;
 		if (server->scroll_offset < min_scroll) server->scroll_offset = min_scroll;
@@ -611,6 +634,42 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 
 		arrange(server);
 	}
+}
+
+static double calculate_gesture_velocity(dwc_server *server) {
+	if (server->gesture_history_len < 2) return 0.0;
+
+	uint64_t now = get_time_ms();
+	uint64_t cutoff = now - DWC_GESTURE_HISTORY_MS;
+
+	double total_delta = 0.0;
+	uint64_t first_time = 0;
+	uint64_t last_time = 0;
+	bool found_first = false;
+
+	for (int i = 0; i < server->gesture_history_len; i++) {
+		dwc_gesture_event *ev = &server->gesture_history[i];
+		if (ev->timestamp_ms >= cutoff) {
+			total_delta += ev->dx;
+			if (!found_first) {
+				first_time = ev->timestamp_ms;
+				found_first = true;
+			}
+			last_time = ev->timestamp_ms;
+		}
+	}
+
+	uint64_t time_diff = last_time - first_time;
+	if (time_diff == 0) return 0.0;
+
+	return (total_delta / (double)time_diff) * 1000.0;
+}
+
+#define DECELERATION_TOUCHPAD 0.997
+
+static double calculate_projected_end(dwc_server *server, double velocity) {
+	double decel_factor = 1000.0 * log(DECELERATION_TOUCHPAD);
+	return server->gesture_cumulative_dx - (velocity / decel_factor);
 }
 
 static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *data) {
@@ -629,9 +688,12 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 			return;
 		}
 
-		int swipe_distance = server->scroll_offset - server->gesture_start_offset;
-		bool swiped_right = swipe_distance > 0;
-		bool swiped_left = swipe_distance < 0;
+		double velocity = calculate_gesture_velocity(server);
+		double projected_end = calculate_projected_end(server, velocity);
+		int projected_distance = (int)projected_end;
+
+		bool swiped_right = projected_distance > 0;
+		bool swiped_left = projected_distance < 0;
 
 		dwc_toplevel *neighbor = NULL;
 		if (swiped_right) {
@@ -674,10 +736,10 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 			owl_window_focus(neighbor->window);
 			server->scroll_offset = server->gesture_start_offset;
 		} else {
-			int abs_swipe = abs(swipe_distance);
+			int abs_projected = abs(projected_distance);
 			int focused_width = get_win_width(area.w, g, start_focused->width);
 			int threshold_width = (neighbor_width < focused_width) ? neighbor_width : focused_width;
-			bool crossed_threshold = abs_swipe >= (threshold_width / 2);
+			bool crossed_threshold = abs_projected >= (threshold_width / 2);
 
 			if (crossed_threshold) {
 				server->focused_tiled = neighbor;

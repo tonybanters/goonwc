@@ -3,7 +3,16 @@
 
 #include <owl/owl.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <xkbcommon/xkbcommon.h>
+
+#define DWC_GESTURE_HISTORY_SIZE 32
+#define DWC_GESTURE_HISTORY_MS 150
+
+typedef struct {
+	double dx;
+	uint64_t timestamp_ms;
+} dwc_gesture_event;
 
 typedef enum {
 	DWC_CURSOR_PASSTHROUGH,
@@ -87,6 +96,9 @@ struct dwc_server {
 	bool gesture_active;
 	int gesture_start_offset;
 	dwc_toplevel *gesture_start_focused;
+	double gesture_cumulative_dx;
+	dwc_gesture_event gesture_history[DWC_GESTURE_HISTORY_SIZE];
+	int gesture_history_len;
 
 	owl_workspace *workspaces[9];
 
