@@ -37,6 +37,10 @@ PRIMARY_SEL_XML = lib/owl/protocols/wp-primary-selection-unstable-v1.xml
 PRIMARY_SEL_H = build/wp-primary-selection-unstable-v1-protocol.h
 PRIMARY_SEL_C = build/wp-primary-selection-unstable-v1-protocol.c
 
+LINUX_DMABUF_XML = lib/owl/protocols/linux-dmabuf-unstable-v1.xml
+LINUX_DMABUF_H = build/linux-dmabuf-unstable-v1-protocol.h
+LINUX_DMABUF_C = build/linux-dmabuf-unstable-v1-protocol.c
+
 ALL_SRC = $(DWC_SRC) $(OWL_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
@@ -46,7 +50,7 @@ TARGET = dwc
 
 all: $(TARGET)
 
-$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(OBJ)
+$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 build:
@@ -94,7 +98,13 @@ $(PRIMARY_SEL_H): $(PRIMARY_SEL_XML) | build
 $(PRIMARY_SEL_C): $(PRIMARY_SEL_XML) | build
 	wayland-scanner private-code $< $@
 
-%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C)
+$(LINUX_DMABUF_H): $(LINUX_DMABUF_XML) | build
+	wayland-scanner server-header $< $@
+
+$(LINUX_DMABUF_C): $(LINUX_DMABUF_XML) | build
+	wayland-scanner private-code $< $@
+
+%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

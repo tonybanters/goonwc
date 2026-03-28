@@ -4,10 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <gbm.h>
+#include <drm_fourcc.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <wayland-server-protocol.h>
@@ -20,6 +23,58 @@
 #ifndef GL_UNPACK_ROW_LENGTH_EXT
 #define GL_UNPACK_ROW_LENGTH_EXT 0x0CF2
 #endif
+
+#ifndef EGL_EXT_image_dma_buf_import
+#define EGL_LINUX_DMA_BUF_EXT 0x3270
+#define EGL_LINUX_DRM_FOURCC_EXT 0x3271
+#define EGL_DMA_BUF_PLANE0_FD_EXT 0x3272
+#define EGL_DMA_BUF_PLANE0_OFFSET_EXT 0x3273
+#define EGL_DMA_BUF_PLANE0_PITCH_EXT 0x3274
+#define EGL_DMA_BUF_PLANE1_FD_EXT 0x3275
+#define EGL_DMA_BUF_PLANE1_OFFSET_EXT 0x3276
+#define EGL_DMA_BUF_PLANE1_PITCH_EXT 0x3277
+#define EGL_DMA_BUF_PLANE2_FD_EXT 0x3278
+#define EGL_DMA_BUF_PLANE2_OFFSET_EXT 0x3279
+#define EGL_DMA_BUF_PLANE2_PITCH_EXT 0x327A
+#define EGL_DMA_BUF_PLANE3_FD_EXT 0x3440
+#define EGL_DMA_BUF_PLANE3_OFFSET_EXT 0x3441
+#define EGL_DMA_BUF_PLANE3_PITCH_EXT 0x3442
+#endif
+
+#ifndef EGL_EXT_image_dma_buf_import_modifiers
+#define EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT 0x3443
+#define EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT 0x3444
+#define EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT 0x3445
+#define EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT 0x3446
+#define EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT 0x3447
+#define EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT 0x3448
+#define EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT 0x3449
+#define EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT 0x344A
+#endif
+
+#ifndef GL_OES_EGL_image
+#define GL_OES_EGL_image 1
+typedef void *GLeglImageOES;
+typedef void (*PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)(GLenum target, GLeglImageOES image);
+#endif
+
+typedef EGLImageKHR (*PFNEGLCREATEIMAGEKHRPROC)(EGLDisplay dpy, EGLContext ctx,
+	EGLenum target, EGLClientBuffer buffer, const EGLint *attrib_list);
+typedef EGLBoolean (*PFNEGLDESTROYIMAGEKHRPROC)(EGLDisplay dpy, EGLImageKHR image);
+typedef EGLBoolean (*PFNEGLQUERYDMABUFFORMATSEXTPROC)(EGLDisplay dpy,
+	EGLint max_formats, EGLint *formats, EGLint *num_formats);
+typedef EGLBoolean (*PFNEGLQUERYDMABUFMODIFIERSEXTPROC)(EGLDisplay dpy,
+	EGLint format, EGLint max_modifiers, EGLuint64KHR *modifiers,
+	EGLBoolean *external_only, EGLint *num_modifiers);
+
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR;
+static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
+static PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT;
+static PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT;
+
+static bool dmabuf_import_supported = false;
+static bool dmabuf_modifiers_supported = false;
 
 
 static const char *vertex_shader_source =
@@ -218,34 +273,215 @@ static uint32_t get_time_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-void owl_render_init(owl_display *display) {
-    if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context)) {
-        fprintf(stderr, "owl: failed to make EGL context current for init\n");
-        return;
-    }
+static bool has_egl_extension(EGLDisplay dpy, const char *ext) {
+	const char *exts = eglQueryString(dpy, EGL_EXTENSIONS);
+	if (!exts) return false;
+	size_t len = strlen(ext);
+	const char *p = exts;
+	while ((p = strstr(p, ext)) != NULL) {
+		if ((p == exts || p[-1] == ' ') && (p[len] == '\0' || p[len] == ' '))
+			return true;
+		p += len;
+	}
+	return false;
+}
 
-    if (!init_shaders()) {
-        fprintf(stderr, "owl: failed to initialize shaders\n");
-    }
+static void init_dmabuf_formats(owl_display *display) {
+	if (!eglQueryDmaBufFormatsEXT) return;
+
+	EGLint count = 0;
+	if (!eglQueryDmaBufFormatsEXT(display->egl_display, 0, NULL, &count) || count == 0)
+		return;
+
+	EGLint *formats = calloc(count, sizeof(EGLint));
+	if (!formats) return;
+
+	if (!eglQueryDmaBufFormatsEXT(display->egl_display, count, formats, &count)) {
+		free(formats);
+		return;
+	}
+
+	int added = 0;
+	for (int i = 0; i < count && added < OWL_MAX_DRM_FORMATS; i++) {
+		uint32_t fmt = formats[i];
+
+		EGLint mod_count = 0;
+		uint64_t *modifiers = NULL;
+
+		if (eglQueryDmaBufModifiersEXT) {
+			eglQueryDmaBufModifiersEXT(display->egl_display, fmt, 0, NULL, NULL, &mod_count);
+			if (mod_count > 0) {
+				modifiers = calloc(mod_count, sizeof(uint64_t));
+				if (modifiers) {
+					eglQueryDmaBufModifiersEXT(display->egl_display, fmt, mod_count,
+						modifiers, NULL, &mod_count);
+				}
+			}
+		}
+
+		if (mod_count == 0) {
+			modifiers = calloc(1, sizeof(uint64_t));
+			if (modifiers) {
+				modifiers[0] = DRM_FORMAT_MOD_INVALID;
+				mod_count = 1;
+			}
+		}
+
+		display->dmabuf_formats[added].format = fmt;
+		display->dmabuf_formats[added].modifiers = modifiers;
+		display->dmabuf_formats[added].modifier_count = mod_count;
+		added++;
+	}
+	display->dmabuf_format_count = added;
+	free(formats);
+}
+
+void owl_render_init(owl_display *display) {
+	if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context)) {
+		fprintf(stderr, "owl: failed to make EGL context current for init\n");
+		return;
+	}
+
+	if (!init_shaders()) {
+		fprintf(stderr, "owl: failed to initialize shaders\n");
+	}
+
+	eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+	eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
+	glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+		eglGetProcAddress("glEGLImageTargetTexture2DOES");
+
+	if (has_egl_extension(display->egl_display, "EGL_EXT_image_dma_buf_import") &&
+	    eglCreateImageKHR && eglDestroyImageKHR && glEGLImageTargetTexture2DOES) {
+		dmabuf_import_supported = true;
+		display->dmabuf_import_supported = true;
+		fprintf(stderr, "owl: EGL dmabuf import supported\n");
+	}
+
+	if (has_egl_extension(display->egl_display, "EGL_EXT_image_dma_buf_import_modifiers")) {
+		eglQueryDmaBufFormatsEXT = (PFNEGLQUERYDMABUFFORMATSEXTPROC)
+			eglGetProcAddress("eglQueryDmaBufFormatsEXT");
+		eglQueryDmaBufModifiersEXT = (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)
+			eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+		if (eglQueryDmaBufFormatsEXT && eglQueryDmaBufModifiersEXT)
+			dmabuf_modifiers_supported = true;
+	}
+
+	if (dmabuf_import_supported)
+		init_dmabuf_formats(display);
 }
 
 void owl_render_cleanup(owl_display *display) {
-    (void)display;
+	for (int i = 0; i < display->dmabuf_format_count; i++) {
+		free(display->dmabuf_formats[i].modifiers);
+	}
+	display->dmabuf_format_count = 0;
 
-    if (quad_vbo) {
-        glDeleteBuffers(1, &quad_vbo);
-        quad_vbo = 0;
-    }
+	if (quad_vbo) {
+		glDeleteBuffers(1, &quad_vbo);
+		quad_vbo = 0;
+	}
 
-    if (shader_program) {
-        glDeleteProgram(shader_program);
-        shader_program = 0;
-    }
+	if (shader_program) {
+		glDeleteProgram(shader_program);
+		shader_program = 0;
+	}
 
-    if (solid_shader_program) {
-        glDeleteProgram(solid_shader_program);
-        solid_shader_program = 0;
-    }
+	if (solid_shader_program) {
+		glDeleteProgram(solid_shader_program);
+		solid_shader_program = 0;
+	}
+}
+
+bool owl_dmabuf_import(owl_display *display, owl_dmabuf_buffer *buffer) {
+	if (!dmabuf_import_supported || !buffer || buffer->plane_count < 1)
+		return false;
+
+	if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context))
+		return false;
+
+	bool has_modifier = buffer->modifier != DRM_FORMAT_MOD_INVALID;
+
+	int attr_idx = 0;
+	EGLint attribs[64];
+	attribs[attr_idx++] = EGL_WIDTH;
+	attribs[attr_idx++] = buffer->width;
+	attribs[attr_idx++] = EGL_HEIGHT;
+	attribs[attr_idx++] = buffer->height;
+	attribs[attr_idx++] = EGL_LINUX_DRM_FOURCC_EXT;
+	attribs[attr_idx++] = buffer->format;
+
+	struct {
+		EGLint fd, offset, pitch, mod_lo, mod_hi;
+	} plane_attribs[4] = {
+		{ EGL_DMA_BUF_PLANE0_FD_EXT, EGL_DMA_BUF_PLANE0_OFFSET_EXT, EGL_DMA_BUF_PLANE0_PITCH_EXT,
+		  EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT },
+		{ EGL_DMA_BUF_PLANE1_FD_EXT, EGL_DMA_BUF_PLANE1_OFFSET_EXT, EGL_DMA_BUF_PLANE1_PITCH_EXT,
+		  EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT },
+		{ EGL_DMA_BUF_PLANE2_FD_EXT, EGL_DMA_BUF_PLANE2_OFFSET_EXT, EGL_DMA_BUF_PLANE2_PITCH_EXT,
+		  EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT },
+		{ EGL_DMA_BUF_PLANE3_FD_EXT, EGL_DMA_BUF_PLANE3_OFFSET_EXT, EGL_DMA_BUF_PLANE3_PITCH_EXT,
+		  EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT, EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT },
+	};
+
+	for (int i = 0; i < buffer->plane_count; i++) {
+		attribs[attr_idx++] = plane_attribs[i].fd;
+		attribs[attr_idx++] = buffer->fds[i];
+		attribs[attr_idx++] = plane_attribs[i].offset;
+		attribs[attr_idx++] = buffer->offsets[i];
+		attribs[attr_idx++] = plane_attribs[i].pitch;
+		attribs[attr_idx++] = buffer->strides[i];
+
+		if (has_modifier && dmabuf_modifiers_supported) {
+			attribs[attr_idx++] = plane_attribs[i].mod_lo;
+			attribs[attr_idx++] = buffer->modifier & 0xFFFFFFFF;
+			attribs[attr_idx++] = plane_attribs[i].mod_hi;
+			attribs[attr_idx++] = buffer->modifier >> 32;
+		}
+	}
+	attribs[attr_idx++] = EGL_NONE;
+
+	EGLImageKHR image = eglCreateImageKHR(display->egl_display, EGL_NO_CONTEXT,
+		EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
+	if (image == EGL_NO_IMAGE_KHR) {
+		fprintf(stderr, "owl: failed to create EGLImage from dmabuf\n");
+		return false;
+	}
+
+	if (buffer->texture_id == 0)
+		glGenTextures(1, &buffer->texture_id);
+
+	glBindTexture(GL_TEXTURE_2D, buffer->texture_id);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+	glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, image);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	if (buffer->egl_image)
+		eglDestroyImageKHR(display->egl_display, buffer->egl_image);
+	buffer->egl_image = image;
+
+	return true;
+}
+
+void owl_dmabuf_buffer_destroy(owl_dmabuf_buffer *buffer) {
+	if (!buffer) return;
+
+	if (buffer->egl_image && buffer->display)
+		eglDestroyImageKHR(buffer->display->egl_display, buffer->egl_image);
+
+	if (buffer->texture_id)
+		glDeleteTextures(1, &buffer->texture_id);
+
+	for (int i = 0; i < buffer->plane_count; i++) {
+		if (buffer->fds[i] >= 0)
+			close(buffer->fds[i]);
+	}
+
+	free(buffer);
 }
 
 void owl_render_rect(int x, int y, int w, int h, float r, float g, float b, float a) {
@@ -267,46 +503,61 @@ void owl_render_rect(int x, int y, int w, int h, float r, float g, float b, floa
 }
 
 uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface) {
-    if (!surface || !surface->current.buffer) {
-        return 0;
-    }
+	if (!surface || !surface->current.buffer)
+		return 0;
 
-    owl_shm_buffer *buffer = surface->current.buffer;
-    owl_shm_pool *pool = buffer->pool;
+	if (surface->current.buffer_type == OWL_BUFFER_DMABUF) {
+		owl_dmabuf_buffer *buffer = surface->current.buffer;
+		if (!buffer || buffer->failed)
+			return 0;
 
-    if (!pool || !pool->data) {
-        return 0;
-    }
+		if (!buffer->egl_image) {
+			if (!owl_dmabuf_import(display, buffer)) {
+				buffer->failed = true;
+				return 0;
+			}
+		}
 
-    if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context)) {
-        return 0;
-    }
+		surface->texture_id = buffer->texture_id;
+		surface->texture_width = buffer->width;
+		surface->texture_height = buffer->height;
+		wl_buffer_send_release(buffer->resource);
+		return surface->texture_id;
+	}
 
-    if (surface->texture_id == 0) {
-        glGenTextures(1, &surface->texture_id);
-    }
+	owl_shm_buffer *buffer = surface->current.buffer;
+	owl_shm_pool *pool = buffer->pool;
 
-    glBindTexture(GL_TEXTURE_2D, surface->texture_id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	if (!pool || !pool->data)
+		return 0;
 
-    void *pixels = (char *)pool->data + buffer->offset;
+	if (!eglMakeCurrent(display->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, display->egl_context))
+		return 0;
 
-    glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, buffer->stride / 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buffer->width, buffer->height,
-                 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixels);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
+	if (surface->texture_id == 0)
+		glGenTextures(1, &surface->texture_id);
 
-    surface->texture_width = buffer->width;
-    surface->texture_height = buffer->height;
+	glBindTexture(GL_TEXTURE_2D, surface->texture_id);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glBindTexture(GL_TEXTURE_2D, 0);
+	void *pixels = (char *)pool->data + buffer->offset;
 
-    wl_buffer_send_release(buffer->resource);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, buffer->stride / 4);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buffer->width, buffer->height,
+		0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixels);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
 
-    return surface->texture_id;
+	surface->texture_width = buffer->width;
+	surface->texture_height = buffer->height;
+
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	wl_buffer_send_release(buffer->resource);
+
+	return surface->texture_id;
 }
 
 void owl_render_surface(owl_display *display, owl_surface *surface, int x, int y) {

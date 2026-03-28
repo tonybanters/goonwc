@@ -39,6 +39,9 @@
 #include "wlr-screencopy-unstable-v1-protocol.c"
 #include "wp-primary-selection-unstable-v1-protocol.h"
 #include "wp-primary-selection-unstable-v1-protocol.c"
+#include "linux-dmabuf-unstable-v1-protocol.h"
+#include "linux-dmabuf-unstable-v1-protocol.c"
+#include <drm_fourcc.h>
 
 /* ==========================================================================
  * Debug logging
@@ -454,7 +457,16 @@ static void surface_attach(struct wl_client *client, struct wl_resource *resourc
 	owl_surface *surface = wl_resource_get_user_data(resource);
 	if (!surface) return;
 
-	surface->pending.buffer = buffer_resource ? wl_resource_get_user_data(buffer_resource) : NULL;
+	if (!buffer_resource) {
+		surface->pending.buffer = NULL;
+		surface->pending.buffer_type = OWL_BUFFER_SHM;
+	} else if (wl_resource_instance_of(buffer_resource, &wl_buffer_interface, &buffer_interface)) {
+		surface->pending.buffer = wl_resource_get_user_data(buffer_resource);
+		surface->pending.buffer_type = OWL_BUFFER_SHM;
+	} else {
+		surface->pending.buffer = wl_resource_get_user_data(buffer_resource);
+		surface->pending.buffer_type = OWL_BUFFER_DMABUF;
+	}
 	surface->pending.buffer_x = x;
 	surface->pending.buffer_y = y;
 	surface->pending.buffer_attached = true;
@@ -527,6 +539,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
 
 	if (surface->pending.buffer_attached) {
 		surface->current.buffer = surface->pending.buffer;
+		surface->current.buffer_type = surface->pending.buffer_type;
 		surface->current.buffer_x = surface->pending.buffer_x;
 		surface->current.buffer_y = surface->pending.buffer_y;
 		surface->pending.buffer_attached = false;
@@ -3398,6 +3411,280 @@ static int handle_drm_event(int fd, uint32_t mask, void *data) {
 	return 0;
 }
 
+/* ==========================================================================
+ * Linux DMA-BUF protocol
+ * ========================================================================== */
+
+static void dmabuf_buffer_destroy_handler(struct wl_resource *resource) {
+	owl_dmabuf_buffer *buffer = wl_resource_get_user_data(resource);
+	owl_dmabuf_buffer_destroy(buffer);
+}
+
+static void dmabuf_buffer_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct wl_buffer_interface dmabuf_buffer_impl = {
+	.destroy = dmabuf_buffer_destroy,
+};
+
+static void dmabuf_params_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void dmabuf_params_destroy_handler(struct wl_resource *resource) {
+	owl_dmabuf_params *params = wl_resource_get_user_data(resource);
+	if (!params) return;
+
+	for (int i = 0; i < OWL_MAX_DMABUF_PLANES; i++) {
+		if (params->fds[i] >= 0)
+			close(params->fds[i]);
+	}
+	free(params);
+}
+
+static void dmabuf_params_add(struct wl_client *client, struct wl_resource *resource,
+                              int32_t fd, uint32_t plane_idx, uint32_t offset,
+                              uint32_t stride, uint32_t modifier_hi, uint32_t modifier_lo) {
+	(void)client;
+	owl_dmabuf_params *params = wl_resource_get_user_data(resource);
+	if (!params) return;
+
+	if (plane_idx >= OWL_MAX_DMABUF_PLANES) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX,
+			"plane index %u too large", plane_idx);
+		close(fd);
+		return;
+	}
+
+	if (params->planes_set[plane_idx]) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_SET,
+			"plane %u already set", plane_idx);
+		close(fd);
+		return;
+	}
+
+	uint64_t modifier = ((uint64_t)modifier_hi << 32) | modifier_lo;
+	if (params->plane_count > 0 && params->modifier != modifier) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
+			"modifier mismatch");
+		close(fd);
+		return;
+	}
+
+	params->fds[plane_idx] = fd;
+	params->offsets[plane_idx] = offset;
+	params->strides[plane_idx] = stride;
+	params->modifier = modifier;
+	params->planes_set[plane_idx] = true;
+	params->plane_count++;
+}
+
+static owl_dmabuf_buffer *create_dmabuf_buffer(owl_dmabuf_params *params,
+                                                int32_t width, int32_t height,
+                                                uint32_t format, uint32_t flags) {
+	if (width <= 0 || height <= 0) return NULL;
+
+	for (int i = 0; i < params->plane_count; i++) {
+		if (!params->planes_set[i])
+			return NULL;
+	}
+
+	owl_dmabuf_buffer *buffer = calloc(1, sizeof(owl_dmabuf_buffer));
+	if (!buffer) return NULL;
+
+	buffer->display = params->display;
+	buffer->width = width;
+	buffer->height = height;
+	buffer->format = format;
+	buffer->flags = flags;
+	buffer->modifier = params->modifier;
+	buffer->plane_count = params->plane_count;
+
+	for (int i = 0; i < params->plane_count; i++) {
+		buffer->fds[i] = params->fds[i];
+		buffer->offsets[i] = params->offsets[i];
+		buffer->strides[i] = params->strides[i];
+		params->fds[i] = -1;
+	}
+
+	for (int i = params->plane_count; i < OWL_MAX_DMABUF_PLANES; i++)
+		buffer->fds[i] = -1;
+
+	return buffer;
+}
+
+static void dmabuf_params_create(struct wl_client *client, struct wl_resource *resource,
+                                 int32_t width, int32_t height, uint32_t format, uint32_t flags) {
+	owl_dmabuf_params *params = wl_resource_get_user_data(resource);
+	if (!params) return;
+
+	if (params->used) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+			"params already used");
+		return;
+	}
+	params->used = true;
+
+	owl_dmabuf_buffer *buffer = create_dmabuf_buffer(params, width, height, format, flags);
+	if (!buffer) {
+		zwp_linux_buffer_params_v1_send_failed(resource);
+		return;
+	}
+
+	struct wl_resource *buffer_resource = wl_resource_create(client, &wl_buffer_interface, 1, 0);
+	if (!buffer_resource) {
+		owl_dmabuf_buffer_destroy(buffer);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(buffer_resource, &dmabuf_buffer_impl, buffer,
+		dmabuf_buffer_destroy_handler);
+	buffer->resource = buffer_resource;
+
+	zwp_linux_buffer_params_v1_send_created(resource, buffer_resource);
+}
+
+static void dmabuf_params_create_immed(struct wl_client *client, struct wl_resource *resource,
+                                       uint32_t buffer_id, int32_t width, int32_t height,
+                                       uint32_t format, uint32_t flags) {
+	owl_dmabuf_params *params = wl_resource_get_user_data(resource);
+	if (!params) return;
+
+	if (params->used) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+			"params already used");
+		return;
+	}
+	params->used = true;
+
+	owl_dmabuf_buffer *buffer = create_dmabuf_buffer(params, width, height, format, flags);
+	if (!buffer) {
+		wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
+			"failed to create buffer");
+		return;
+	}
+
+	struct wl_resource *buffer_resource = wl_resource_create(client, &wl_buffer_interface, 1, buffer_id);
+	if (!buffer_resource) {
+		owl_dmabuf_buffer_destroy(buffer);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(buffer_resource, &dmabuf_buffer_impl, buffer,
+		dmabuf_buffer_destroy_handler);
+	buffer->resource = buffer_resource;
+}
+
+static const struct zwp_linux_buffer_params_v1_interface dmabuf_params_impl = {
+	.destroy = dmabuf_params_destroy,
+	.add = dmabuf_params_add,
+	.create = dmabuf_params_create,
+	.create_immed = dmabuf_params_create_immed,
+};
+
+static void dmabuf_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void dmabuf_create_params(struct wl_client *client, struct wl_resource *resource,
+                                 uint32_t params_id) {
+	owl_display *display = wl_resource_get_user_data(resource);
+
+	owl_dmabuf_params *params = calloc(1, sizeof(owl_dmabuf_params));
+	if (!params) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	params->display = display;
+	for (int i = 0; i < OWL_MAX_DMABUF_PLANES; i++)
+		params->fds[i] = -1;
+
+	uint32_t version = wl_resource_get_version(resource);
+	struct wl_resource *params_resource = wl_resource_create(client,
+		&zwp_linux_buffer_params_v1_interface, version, params_id);
+	if (!params_resource) {
+		free(params);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	params->resource = params_resource;
+	wl_resource_set_implementation(params_resource, &dmabuf_params_impl, params,
+		dmabuf_params_destroy_handler);
+}
+
+static void dmabuf_get_default_feedback(struct wl_client *client, struct wl_resource *resource,
+                                        uint32_t id) {
+	(void)client; (void)resource; (void)id;
+}
+
+static void dmabuf_get_surface_feedback(struct wl_client *client, struct wl_resource *resource,
+                                        uint32_t id, struct wl_resource *surface) {
+	(void)client; (void)resource; (void)id; (void)surface;
+}
+
+static const struct zwp_linux_dmabuf_v1_interface dmabuf_impl = {
+	.destroy = dmabuf_destroy,
+	.create_params = dmabuf_create_params,
+	.get_default_feedback = dmabuf_get_default_feedback,
+	.get_surface_feedback = dmabuf_get_surface_feedback,
+};
+
+static void dmabuf_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	uint32_t bound_version = version < 3 ? version : 3;
+
+	struct wl_resource *resource = wl_resource_create(client,
+		&zwp_linux_dmabuf_v1_interface, bound_version, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(resource, &dmabuf_impl, display, NULL);
+
+	for (int i = 0; i < display->dmabuf_format_count; i++) {
+		owl_drm_format *fmt = &display->dmabuf_formats[i];
+		for (int j = 0; j < fmt->modifier_count; j++) {
+			uint64_t mod = fmt->modifiers[j];
+			zwp_linux_dmabuf_v1_send_modifier(resource, fmt->format,
+				mod >> 32, mod & 0xFFFFFFFF);
+		}
+	}
+}
+
+void owl_dmabuf_init(owl_display *display) {
+	if (!display->dmabuf_import_supported) {
+		fprintf(stderr, "owl: dmabuf import not supported, skipping\n");
+		return;
+	}
+
+	display->dmabuf_global = wl_global_create(display->wayland_display,
+		&zwp_linux_dmabuf_v1_interface, 3, display, dmabuf_bind);
+
+	if (!display->dmabuf_global) {
+		fprintf(stderr, "owl: failed to create dmabuf global\n");
+		return;
+	}
+
+	fprintf(stderr, "owl: linux-dmabuf initialized with %d formats\n",
+		display->dmabuf_format_count);
+}
+
+void owl_dmabuf_cleanup(owl_display *display) {
+	if (display->dmabuf_global) {
+		wl_global_destroy(display->dmabuf_global);
+		display->dmabuf_global = NULL;
+	}
+}
+
 owl_display *owl_display_create(void) {
 	owl_display *display = calloc(1, sizeof(owl_display));
 	if (!display) return NULL;
@@ -3463,6 +3750,7 @@ owl_display *owl_display_create(void) {
 	owl_screencopy_init(display);
 	owl_primary_selection_init(display);
 	owl_render_init(display);
+	owl_dmabuf_init(display);
 
 	wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
 

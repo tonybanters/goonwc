@@ -13,6 +13,19 @@
 #define OWL_MAX_CALLBACKS 16
 #define OWL_MAX_WORKSPACES 32
 #define OWL_MAX_LAYER_SURFACES 64
+#define OWL_MAX_DMABUF_PLANES 4
+#define OWL_MAX_DRM_FORMATS 64
+
+typedef enum owl_buffer_type {
+	OWL_BUFFER_SHM,
+	OWL_BUFFER_DMABUF,
+} owl_buffer_type;
+
+typedef struct owl_drm_format {
+	uint32_t format;
+	uint64_t *modifiers;
+	int modifier_count;
+} owl_drm_format;
 
 /* Internal types not exposed in owl.h */
 
@@ -36,8 +49,38 @@ typedef struct owl_shm_buffer {
 	bool busy;
 } owl_shm_buffer;
 
+typedef struct owl_dmabuf_buffer {
+	struct wl_resource *resource;
+	owl_display *display;
+	int32_t width;
+	int32_t height;
+	uint32_t format;
+	uint32_t flags;
+	int plane_count;
+	int fds[OWL_MAX_DMABUF_PLANES];
+	uint32_t offsets[OWL_MAX_DMABUF_PLANES];
+	uint32_t strides[OWL_MAX_DMABUF_PLANES];
+	uint64_t modifier;
+	void *egl_image;
+	uint32_t texture_id;
+	bool failed;
+} owl_dmabuf_buffer;
+
+typedef struct owl_dmabuf_params {
+	owl_display *display;
+	struct wl_resource *resource;
+	int fds[OWL_MAX_DMABUF_PLANES];
+	uint32_t offsets[OWL_MAX_DMABUF_PLANES];
+	uint32_t strides[OWL_MAX_DMABUF_PLANES];
+	uint64_t modifier;
+	int plane_count;
+	bool planes_set[OWL_MAX_DMABUF_PLANES];
+	bool used;
+} owl_dmabuf_params;
+
 typedef struct owl_surface_state {
-	owl_shm_buffer *buffer;
+	owl_buffer_type buffer_type;
+	void *buffer;
 	int32_t buffer_x;
 	int32_t buffer_y;
 	bool buffer_attached;
@@ -270,6 +313,11 @@ struct owl_display {
 	uint32_t primary_serial;
 
 	owl_drag current_drag;
+
+	struct wl_global *dmabuf_global;
+	owl_drm_format dmabuf_formats[OWL_MAX_DRM_FORMATS];
+	int dmabuf_format_count;
+	bool dmabuf_import_supported;
 };
 
 /* Internal functions */
@@ -345,5 +393,10 @@ void owl_drag_start(
 void owl_drag_update(owl_display *display, double x, double y);
 void owl_drag_drop(owl_display *display);
 void owl_drag_cancel(owl_display *display);
+
+void owl_dmabuf_init(owl_display *display);
+void owl_dmabuf_cleanup(owl_display *display);
+bool owl_dmabuf_import(owl_display *display, owl_dmabuf_buffer *buffer);
+void owl_dmabuf_buffer_destroy(owl_dmabuf_buffer *buffer);
 
 #endif
