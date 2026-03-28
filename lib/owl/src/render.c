@@ -629,10 +629,15 @@ void owl_render_surface(owl_display *display, owl_surface *surface, int x, int y
 static void owl_layer_surface_get_position(owl_layer_surface *ls, owl_output *output, int *x, int *y) {
     int out_w = output->width;
     int out_h = output->height;
-    int surf_w = ls->configured_width;
-    int surf_h = ls->configured_height;
+    int surf_w = ls->surface->texture_width;
+    int surf_h = ls->surface->texture_height;
 
-    if (ls->anchor & OWL_ANCHOR_LEFT) {
+    uint32_t both_horiz = OWL_ANCHOR_LEFT | OWL_ANCHOR_RIGHT;
+    uint32_t both_vert = OWL_ANCHOR_TOP | OWL_ANCHOR_BOTTOM;
+
+    if ((ls->anchor & both_horiz) == both_horiz) {
+        *x = (out_w - surf_w) / 2;
+    } else if (ls->anchor & OWL_ANCHOR_LEFT) {
         *x = ls->margin_left;
     } else if (ls->anchor & OWL_ANCHOR_RIGHT) {
         *x = out_w - surf_w - ls->margin_right;
@@ -640,7 +645,9 @@ static void owl_layer_surface_get_position(owl_layer_surface *ls, owl_output *ou
         *x = (out_w - surf_w) / 2;
     }
 
-    if (ls->anchor & OWL_ANCHOR_TOP) {
+    if ((ls->anchor & both_vert) == both_vert) {
+        *y = (out_h - surf_h) / 2;
+    } else if (ls->anchor & OWL_ANCHOR_TOP) {
         *y = ls->margin_top;
     } else if (ls->anchor & OWL_ANCHOR_BOTTOM) {
         *y = out_h - surf_h - ls->margin_bottom;
