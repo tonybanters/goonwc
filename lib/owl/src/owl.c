@@ -41,6 +41,8 @@
 #include "wp-primary-selection-unstable-v1-protocol.c"
 #include "linux-dmabuf-unstable-v1-protocol.h"
 #include "linux-dmabuf-unstable-v1-protocol.c"
+#include "viewporter-protocol.h"
+#include "viewporter-protocol.c"
 #include <drm_fourcc.h>
 
 /* ==========================================================================
@@ -553,6 +555,8 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
 		surface->current.has_damage = true;
 		surface->pending.has_damage = false;
 	}
+
+	surface->current.viewport = surface->pending.viewport;
 
 	wl_list_insert_list(&surface->current.frame_callbacks, &surface->pending.frame_callbacks);
 	wl_list_init(&surface->pending.frame_callbacks);
@@ -3685,6 +3689,155 @@ void owl_dmabuf_cleanup(owl_display *display) {
 	}
 }
 
+/* ==========================================================================
+ * Viewporter protocol
+ * ========================================================================== */
+
+static void viewport_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void viewport_destroy_handler(struct wl_resource *resource) {
+	owl_viewport *viewport = wl_resource_get_user_data(resource);
+	if (!viewport) return;
+
+	if (viewport->surface) {
+		viewport->surface->viewport = NULL;
+		viewport->surface->pending.viewport.has_src = false;
+		viewport->surface->pending.viewport.has_dst = false;
+	}
+	free(viewport);
+}
+
+static void viewport_set_source(struct wl_client *client, struct wl_resource *resource,
+                                wl_fixed_t x, wl_fixed_t y, wl_fixed_t width, wl_fixed_t height) {
+	(void)client;
+	owl_viewport *viewport = wl_resource_get_user_data(resource);
+	if (!viewport || !viewport->surface) {
+		wl_resource_post_error(resource, WP_VIEWPORT_ERROR_NO_SURFACE, "surface destroyed");
+		return;
+	}
+
+	double dx = wl_fixed_to_double(x);
+	double dy = wl_fixed_to_double(y);
+	double dw = wl_fixed_to_double(width);
+	double dh = wl_fixed_to_double(height);
+
+	if (dx == -1.0 && dy == -1.0 && dw == -1.0 && dh == -1.0) {
+		viewport->surface->pending.viewport.has_src = false;
+		return;
+	}
+
+	if (dx < 0 || dy < 0 || dw <= 0 || dh <= 0) {
+		wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_VALUE, "invalid source rectangle");
+		return;
+	}
+
+	viewport->surface->pending.viewport.has_src = true;
+	viewport->surface->pending.viewport.src_x = dx;
+	viewport->surface->pending.viewport.src_y = dy;
+	viewport->surface->pending.viewport.src_width = dw;
+	viewport->surface->pending.viewport.src_height = dh;
+}
+
+static void viewport_set_destination(struct wl_client *client, struct wl_resource *resource,
+                                     int32_t width, int32_t height) {
+	(void)client;
+	owl_viewport *viewport = wl_resource_get_user_data(resource);
+	if (!viewport || !viewport->surface) {
+		wl_resource_post_error(resource, WP_VIEWPORT_ERROR_NO_SURFACE, "surface destroyed");
+		return;
+	}
+
+	if (width == -1 && height == -1) {
+		viewport->surface->pending.viewport.has_dst = false;
+		return;
+	}
+
+	if (width <= 0 || height <= 0) {
+		wl_resource_post_error(resource, WP_VIEWPORT_ERROR_BAD_VALUE, "invalid destination size");
+		return;
+	}
+
+	viewport->surface->pending.viewport.has_dst = true;
+	viewport->surface->pending.viewport.dst_width = width;
+	viewport->surface->pending.viewport.dst_height = height;
+}
+
+static const struct wp_viewport_interface viewport_impl = {
+	.destroy = viewport_destroy,
+	.set_source = viewport_set_source,
+	.set_destination = viewport_set_destination,
+};
+
+static void viewporter_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void viewporter_get_viewport(struct wl_client *client, struct wl_resource *resource,
+                                    uint32_t id, struct wl_resource *surface_resource) {
+	owl_surface *surface = wl_resource_get_user_data(surface_resource);
+
+	if (!surface) {
+		wl_resource_post_error(resource, WP_VIEWPORTER_ERROR_VIEWPORT_EXISTS, "invalid surface");
+		return;
+	}
+
+	if (surface->viewport) {
+		wl_resource_post_error(resource, WP_VIEWPORTER_ERROR_VIEWPORT_EXISTS,
+			"surface already has viewport");
+		return;
+	}
+
+	owl_viewport *viewport = calloc(1, sizeof(owl_viewport));
+	if (!viewport) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	viewport->surface = surface;
+	viewport->resource = wl_resource_create(client, &wp_viewport_interface, 1, id);
+	if (!viewport->resource) {
+		free(viewport);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(viewport->resource, &viewport_impl, viewport, viewport_destroy_handler);
+	surface->viewport = viewport;
+}
+
+static const struct wp_viewporter_interface viewporter_impl = {
+	.destroy = viewporter_destroy,
+	.get_viewport = viewporter_get_viewport,
+};
+
+static void viewporter_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	(void)version;
+
+	struct wl_resource *resource = wl_resource_create(client, &wp_viewporter_interface, 1, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(resource, &viewporter_impl, display, NULL);
+}
+
+static void owl_viewporter_init(owl_display *display) {
+	display->viewporter_global = wl_global_create(display->wayland_display,
+		&wp_viewporter_interface, 1, display, viewporter_bind);
+
+	if (!display->viewporter_global) {
+		fprintf(stderr, "owl: failed to create viewporter global\n");
+		return;
+	}
+	fprintf(stderr, "owl: viewporter initialized\n");
+}
+
 owl_display *owl_display_create(void) {
 	owl_display *display = calloc(1, sizeof(owl_display));
 	if (!display) return NULL;
@@ -3751,6 +3904,7 @@ owl_display *owl_display_create(void) {
 	owl_primary_selection_init(display);
 	owl_render_init(display);
 	owl_dmabuf_init(display);
+	owl_viewporter_init(display);
 
 	wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
 

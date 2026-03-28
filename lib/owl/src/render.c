@@ -84,12 +84,13 @@ static const char *vertex_shader_source =
     "uniform vec2 screen_size;\n"
     "uniform vec2 surface_pos;\n"
     "uniform vec2 surface_size;\n"
+    "uniform vec4 src_rect;\n"
     "void main() {\n"
     "    vec2 pos = position * surface_size + surface_pos;\n"
     "    vec2 normalized = (pos / screen_size) * 2.0 - 1.0;\n"
     "    normalized.y = -normalized.y;\n"
     "    gl_Position = vec4(normalized, 0.0, 1.0);\n"
-    "    v_texcoord = texcoord;\n"
+    "    v_texcoord = texcoord * src_rect.zw + src_rect.xy;\n"
     "}\n";
 
 static const char *fragment_shader_source =
@@ -126,6 +127,7 @@ static GLint uniform_screen_size = -1;
 static GLint uniform_surface_pos = -1;
 static GLint uniform_surface_size = -1;
 static GLint uniform_texture = -1;
+static GLint uniform_src_rect = -1;
 
 static GLuint solid_shader_program = 0;
 static GLint solid_attr_position = -1;
@@ -200,6 +202,7 @@ static bool init_shaders(void) {
     uniform_surface_pos = glGetUniformLocation(shader_program, "surface_pos");
     uniform_surface_size = glGetUniformLocation(shader_program, "surface_size");
     uniform_texture = glGetUniformLocation(shader_program, "texture0");
+    uniform_src_rect = glGetUniformLocation(shader_program, "src_rect");
 
     glGenBuffers(1, &quad_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
@@ -561,33 +564,56 @@ uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface) {
 }
 
 void owl_render_surface(owl_display *display, owl_surface *surface, int x, int y) {
-    (void)display;
+	(void)display;
 
-    if (!surface || surface->texture_id == 0) {
-        return;
-    }
+	if (!surface || surface->texture_id == 0)
+		return;
 
-    glUseProgram(shader_program);
+	glUseProgram(shader_program);
 
-    glUniform2f(uniform_surface_pos, (float)x, (float)y);
-    glUniform2f(uniform_surface_size, (float)surface->texture_width, (float)surface->texture_height);
+	float render_width = surface->texture_width;
+	float render_height = surface->texture_height;
+	float src_x = 0.0f, src_y = 0.0f;
+	float src_w = 1.0f, src_h = 1.0f;
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, surface->texture_id);
-    glUniform1i(uniform_texture, 0);
+	owl_viewport_state *vp = &surface->current.viewport;
 
-    glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
-    glEnableVertexAttribArray(attr_position);
-    glEnableVertexAttribArray(attr_texcoord);
-    glVertexAttribPointer(attr_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
-    glVertexAttribPointer(attr_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+	if (vp->has_src) {
+		src_x = vp->src_x / surface->texture_width;
+		src_y = vp->src_y / surface->texture_height;
+		src_w = vp->src_width / surface->texture_width;
+		src_h = vp->src_height / surface->texture_height;
+		if (!vp->has_dst) {
+			render_width = vp->src_width;
+			render_height = vp->src_height;
+		}
+	}
 
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	if (vp->has_dst) {
+		render_width = vp->dst_width;
+		render_height = vp->dst_height;
+	}
 
-    glDisableVertexAttribArray(attr_position);
-    glDisableVertexAttribArray(attr_texcoord);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+	glUniform2f(uniform_surface_pos, (float)x, (float)y);
+	glUniform2f(uniform_surface_size, render_width, render_height);
+	glUniform4f(uniform_src_rect, src_x, src_y, src_w, src_h);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, surface->texture_id);
+	glUniform1i(uniform_texture, 0);
+
+	glBindBuffer(GL_ARRAY_BUFFER, quad_vbo);
+	glEnableVertexAttribArray(attr_position);
+	glEnableVertexAttribArray(attr_texcoord);
+	glVertexAttribPointer(attr_position, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)0);
+	glVertexAttribPointer(attr_texcoord, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *)(2 * sizeof(float)));
+
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+	glDisableVertexAttribArray(attr_position);
+	glDisableVertexAttribArray(attr_texcoord);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 /**

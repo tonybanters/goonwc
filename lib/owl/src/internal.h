@@ -78,9 +78,22 @@ typedef struct owl_dmabuf_params {
 	bool used;
 } owl_dmabuf_params;
 
+typedef struct owl_viewport {
+	struct wl_resource *resource;
+	struct owl_surface *surface;
+} owl_viewport;
+
+typedef struct owl_viewport_state {
+	bool has_src;
+	double src_x, src_y, src_width, src_height;
+	bool has_dst;
+	int32_t dst_width, dst_height;
+} owl_viewport_state;
+
 typedef struct owl_surface_state {
 	owl_buffer_type buffer_type;
 	void *buffer;
+	owl_viewport_state viewport;
 	int32_t buffer_x;
 	int32_t buffer_y;
 	bool buffer_attached;
@@ -102,6 +115,7 @@ typedef struct owl_surface {
 	int32_t texture_height;
 	bool has_content;
 	struct wl_list link;
+	owl_viewport *viewport;
 } owl_surface;
 
 typedef struct owl_frame_callback {
@@ -318,6 +332,8 @@ struct owl_display {
 	owl_drm_format dmabuf_formats[OWL_MAX_DRM_FORMATS];
 	int dmabuf_format_count;
 	bool dmabuf_import_supported;
+
+	struct wl_global *viewporter_global;
 };
 
 /* Internal functions */
