@@ -1107,8 +1107,13 @@ void owl_selection_init(owl_display *display) {
 	display->clipboard_source = NULL;
 }
 
-void owl_drag_start(owl_display *display, owl_data_source *source, owl_surface *origin,
-                    owl_surface *icon, uint32_t serial) {
+void owl_drag_start(
+        owl_display *display,
+        owl_data_source *source,
+        owl_surface *origin,
+        owl_surface *icon,
+        uint32_t serial
+    ) {
 	if (display->current_drag.active) {
 		owl_drag_cancel(display);
 	}

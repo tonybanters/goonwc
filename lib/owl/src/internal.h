@@ -335,8 +335,13 @@ void owl_selection_send_offer(owl_display *display, struct wl_client *client);
 void owl_primary_selection_init(owl_display *display);
 void owl_primary_selection_cleanup(owl_display *display);
 void owl_primary_send_offer(owl_display *display, struct wl_client *client);
-void owl_drag_start(owl_display *display, owl_data_source *source, owl_surface *origin,
-                    owl_surface *icon, uint32_t serial);
+void owl_drag_start(
+    owl_display *display,
+    owl_data_source *source,
+    owl_surface *origin,
+    owl_surface *icon,
+    uint32_t serial
+);
 void owl_drag_update(owl_display *display, double x, double y);
 void owl_drag_drop(owl_display *display);
 void owl_drag_cancel(owl_display *display);
