@@ -6,6 +6,12 @@
 
 /* appearance */
 static const int gap = 5;
+
+/* apps blocked from screen capture (by app_id) */
+static const char *block_screen_capture[] = {
+	"foot",
+	NULL
+};
 static const int border_width = 2;
 static const float border_focused[]   = { 0.57f, 0.63f, 0.80f, 1.0f };  /* #929dcc */
 static const float border_unfocused[] = { 0.30f, 0.30f, 0.30f, 1.0f };  /* #4d4d4d */

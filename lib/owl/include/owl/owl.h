@@ -104,6 +104,18 @@ typedef enum {
 	OWL_GESTURE_SWIPE_END,
 } owl_gesture_event;
 
+typedef enum {
+	OWL_RENDER_TARGET_OUTPUT,
+	OWL_RENDER_TARGET_SCREENCAST,
+	OWL_RENDER_TARGET_SCREENSHOT,
+} owl_render_target;
+
+typedef enum {
+	OWL_BLOCK_OUT_NONE,
+	OWL_BLOCK_OUT_SCREENCAST,
+	OWL_BLOCK_OUT_SCREEN_CAPTURE,
+} owl_block_out_from;
+
 /* Gesture data */
 typedef struct owl_gesture {
 	int fingers;
@@ -163,6 +175,7 @@ typedef struct owl_window {
 	bool focused;
 	bool mapped;
 	bool tiled;
+	owl_block_out_from block_out_from;
 	void *user_data;
 
 	/* internal - don't touch */
@@ -271,5 +284,13 @@ void owl_set_render_callback(owl_display *display, owl_render_callback callback,
 
 /* Keyboard settings */
 void owl_set_keyboard_repeat(owl_display *display, int32_t rate, int32_t delay);
+
+/* Session lock */
+bool owl_display_is_locked(owl_display *display);
+int owl_get_lock_surface_count(owl_display *display);
+owl_surface *owl_get_lock_surface(owl_display *display, int index);
+
+/* Capture block */
+void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode);
 
 #endif

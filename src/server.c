@@ -497,6 +497,16 @@ void togglefloating(void *arg) {
 
 
 /* callbacks */
+static bool should_block_capture(const char *app_id) {
+	if (!app_id) return false;
+	for (int i = 0; block_screen_capture[i]; i++) {
+		if (strcmp(app_id, block_screen_capture[i]) == 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void on_window_create(owl_display *display, owl_window *window, void *data) {
 	(void)display;
 	dwc_server *server = data;
@@ -505,6 +515,14 @@ static void on_window_create(owl_display *display, owl_window *window, void *dat
 		window->user_data = toplevel;
 		toplevel_focus(toplevel);
 		arrange(server);
+	}
+}
+
+static void on_window_map(owl_display *display, owl_window *window, void *data) {
+	(void)display;
+	(void)data;
+	if (should_block_capture(window->app_id)) {
+		owl_window_set_block_out_from(window, OWL_BLOCK_OUT_SCREEN_CAPTURE);
 	}
 }
 
@@ -789,6 +807,7 @@ bool server_init(dwc_server *server) {
 
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_CREATE, on_window_create, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_DESTROY, on_window_destroy, server);
+	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_MAP, on_window_map, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_REQUEST_MOVE, on_window_request_move, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_REQUEST_RESIZE, on_window_request_resize, server);
 
@@ -846,9 +865,6 @@ void server_run(dwc_server *server, const char *startup_cmd) {
 }
 
 void server_cleanup(dwc_server *server) {
-	while (server->toplevels) {
-		toplevel_destroy(server->toplevels);
-	}
 	owl_display_destroy(server->display);
 }
 

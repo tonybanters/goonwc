@@ -43,6 +43,8 @@
 #include "linux-dmabuf-unstable-v1-protocol.c"
 #include "viewporter-protocol.h"
 #include "viewporter-protocol.c"
+#include "ext-session-lock-v1-protocol.h"
+#include "ext-session-lock-v1-protocol.c"
 #include <drm_fourcc.h>
 
 /* ==========================================================================
@@ -429,19 +431,57 @@ static void surface_state_cleanup(owl_surface_state *state) {
 	}
 }
 
+static owl_window *find_window_for_surface(owl_display *display, owl_surface *surface);
+static owl_layer_surface *find_layer_surface_for_surface(owl_display *display, owl_surface *surface);
+
 static void surface_destroy_handler(struct wl_resource *resource) {
 	owl_surface *surface = wl_resource_get_user_data(resource);
 	if (!surface) return;
 
-	if (surface->display->cursor_surface == surface)
-		surface->display->cursor_surface = NULL;
-	if (surface->display->keyboard_focus == surface)
-		surface->display->keyboard_focus = NULL;
-	if (surface->display->pointer_focus == surface)
-		surface->display->pointer_focus = NULL;
+	owl_display *display = surface->display;
+
+	owl_window *window = find_window_for_surface(display, surface);
+	if (window) {
+		window->surface = NULL;
+		if (window->xdg_surface_resource)
+			wl_resource_destroy(window->xdg_surface_resource);
+	}
+
+	owl_layer_surface *ls = find_layer_surface_for_surface(display, surface);
+	if (ls) {
+		ls->surface = NULL;
+		if (ls->layer_surface_resource)
+			wl_resource_destroy(ls->layer_surface_resource);
+	}
+
+	if (display->cursor_surface == surface)
+		display->cursor_surface = NULL;
+	if (display->keyboard_focus == surface)
+		display->keyboard_focus = NULL;
+	if (display->pointer_focus == surface)
+		display->pointer_focus = NULL;
+
+	if (display->current_drag.origin == surface ||
+	    display->current_drag.icon == surface) {
+		display->current_drag.origin = NULL;
+		display->current_drag.icon = NULL;
+		display->current_drag.focus = NULL;
+		display->current_drag.active = false;
+	}
+	if (display->current_drag.focus == surface)
+		display->current_drag.focus = NULL;
+
+	if (surface->viewport)
+		surface->viewport->surface = NULL;
+
+	for (int i = 0; i < display->lock_surface_count; i++) {
+		if (display->lock_surfaces[i]->surface == surface) {
+			display->lock_surfaces[i]->surface = NULL;
+		}
+	}
 
 	wl_list_remove(&surface->link);
-	surface->display->surface_count--;
+	display->surface_count--;
 
 	surface_state_cleanup(&surface->pending);
 	surface_state_cleanup(&surface->current);
@@ -779,6 +819,13 @@ static void data_source_destroy_handler(struct wl_resource *resource) {
 		owl_drag_cancel(display);
 	}
 
+	owl_data_offer *offer, *tmp;
+	wl_list_for_each_safe(offer, tmp, &source->offers, link) {
+		offer->source = NULL;
+		wl_list_remove(&offer->link);
+		wl_list_init(&offer->link);
+	}
+
 	for (int i = 0; i < source->mime_type_count; i++) {
 		free(source->mime_types[i]);
 	}
@@ -823,6 +870,9 @@ static void data_offer_destroy_handler(struct wl_resource *resource) {
 	owl_display *display = offer->display;
 	if (display->current_drag.offer == offer) {
 		display->current_drag.offer = NULL;
+	}
+	if (offer->source) {
+		wl_list_remove(&offer->link);
 	}
 	free(offer);
 }
@@ -925,11 +975,13 @@ static owl_data_offer *create_data_offer(owl_display *display, struct wl_resourc
 
 	offer->display = display;
 	offer->source = source;
+	wl_list_insert(&source->offers, &offer->link);
 
 	uint32_t version = wl_resource_get_version(device_resource);
 	offer->resource = wl_resource_create(wl_resource_get_client(device_resource),
 		&wl_data_offer_interface, version, 0);
 	if (!offer->resource) {
+		wl_list_remove(&offer->link);
 		free(offer);
 		return NULL;
 	}
@@ -1026,6 +1078,7 @@ static void data_device_manager_create_data_source(struct wl_client *client,
 	}
 
 	source->display = display;
+	wl_list_init(&source->offers);
 	uint32_t version = wl_resource_get_version(resource);
 	source->resource = wl_resource_create(client, &wl_data_source_interface, version, id);
 	if (!source->resource) {
@@ -3031,6 +3084,13 @@ static void primary_source_destroy_handler(struct wl_resource *resource) {
 		display->primary_source = NULL;
 	}
 
+	owl_primary_offer *offer, *tmp;
+	wl_list_for_each_safe(offer, tmp, &source->offers, link) {
+		offer->source = NULL;
+		wl_list_remove(&offer->link);
+		wl_list_init(&offer->link);
+	}
+
 	for (int i = 0; i < source->mime_type_count; i++) {
 		free(source->mime_types[i]);
 	}
@@ -3058,6 +3118,10 @@ static const struct zwp_primary_selection_source_v1_interface primary_source_imp
 
 static void primary_offer_destroy_handler(struct wl_resource *resource) {
 	owl_primary_offer *offer = wl_resource_get_user_data(resource);
+	if (!offer) return;
+	if (offer->source) {
+		wl_list_remove(&offer->link);
+	}
 	free(offer);
 }
 
@@ -3092,11 +3156,13 @@ static owl_primary_offer *create_primary_offer(owl_display *display,
 
 	offer->display = display;
 	offer->source = source;
+	wl_list_insert(&source->offers, &offer->link);
 
 	uint32_t version = wl_resource_get_version(device_resource);
 	offer->resource = wl_resource_create(wl_resource_get_client(device_resource),
 		&zwp_primary_selection_offer_v1_interface, version, 0);
 	if (!offer->resource) {
+		wl_list_remove(&offer->link);
 		free(offer);
 		return NULL;
 	}
@@ -3163,6 +3229,7 @@ static void primary_manager_create_source(struct wl_client *client,
 	}
 
 	source->display = display;
+	wl_list_init(&source->offers);
 	uint32_t version = wl_resource_get_version(resource);
 	source->resource = wl_resource_create(client, &zwp_primary_selection_source_v1_interface,
 		version, id);
@@ -3838,6 +3905,252 @@ static void owl_viewporter_init(owl_display *display) {
 	fprintf(stderr, "owl: viewporter initialized\n");
 }
 
+static void session_lock_surface_destroy_handler(struct wl_resource *resource) {
+	owl_session_lock_surface *lock_surface = wl_resource_get_user_data(resource);
+	if (!lock_surface) return;
+
+	owl_display *display = lock_surface->display;
+	for (int i = 0; i < display->lock_surface_count; i++) {
+		if (display->lock_surfaces[i] == lock_surface) {
+			memmove(&display->lock_surfaces[i], &display->lock_surfaces[i + 1],
+			        (display->lock_surface_count - i - 1) * sizeof(owl_session_lock_surface *));
+			display->lock_surface_count--;
+			break;
+		}
+	}
+	free(lock_surface);
+}
+
+static void session_lock_surface_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void session_lock_surface_ack_configure(struct wl_client *client,
+                                                struct wl_resource *resource,
+                                                uint32_t serial) {
+	(void)client;
+	owl_session_lock_surface *lock_surface = wl_resource_get_user_data(resource);
+	if (!lock_surface) return;
+
+	if (serial == lock_surface->pending_serial) {
+		lock_surface->configured = true;
+	}
+}
+
+static const struct ext_session_lock_surface_v1_interface session_lock_surface_impl = {
+	.destroy = session_lock_surface_destroy,
+	.ack_configure = session_lock_surface_ack_configure,
+};
+
+static void session_lock_destroy_handler(struct wl_resource *resource) {
+	owl_session_lock *lock = wl_resource_get_user_data(resource);
+	if (!lock) return;
+
+	owl_display *display = lock->display;
+
+	for (int i = 0; i < display->lock_surface_count; i++) {
+		if (display->lock_surfaces[i]->lock == lock) {
+			display->lock_surfaces[i]->lock = NULL;
+		}
+	}
+
+	if (display->session_lock == lock) {
+		display->session_lock = NULL;
+		display->locked = false;
+	}
+	free(lock);
+}
+
+static void session_lock_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	owl_session_lock *lock = wl_resource_get_user_data(resource);
+	if (lock && lock->locked) {
+		wl_resource_post_error(resource, EXT_SESSION_LOCK_V1_ERROR_INVALID_DESTROY,
+		                       "cannot destroy lock after locked event");
+		return;
+	}
+	wl_resource_destroy(resource);
+}
+
+static void session_lock_get_lock_surface(struct wl_client *client,
+                                           struct wl_resource *resource,
+                                           uint32_t id,
+                                           struct wl_resource *surface_resource,
+                                           struct wl_resource *output_resource) {
+	owl_session_lock *lock = wl_resource_get_user_data(resource);
+	if (!lock) return;
+
+	owl_display *display = lock->display;
+	owl_surface *surface = owl_surface_from_resource(surface_resource);
+
+	owl_output *output = NULL;
+	if (display->output_count > 0) {
+		output = display->outputs[0];
+	}
+
+	owl_session_lock_surface *lock_surface = calloc(1, sizeof(owl_session_lock_surface));
+	if (!lock_surface) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	lock_surface->display = display;
+	lock_surface->lock = lock;
+	lock_surface->surface = surface;
+	lock_surface->output = output;
+
+	lock_surface->resource = wl_resource_create(client, &ext_session_lock_surface_v1_interface, 1, id);
+	if (!lock_surface->resource) {
+		free(lock_surface);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(lock_surface->resource, &session_lock_surface_impl,
+	                               lock_surface, session_lock_surface_destroy_handler);
+
+	if (display->lock_surface_count < OWL_MAX_LOCK_SURFACES) {
+		display->lock_surfaces[display->lock_surface_count++] = lock_surface;
+	}
+
+	owl_seat_set_keyboard_focus(display, surface);
+
+	uint32_t serial = wl_display_next_serial(display->wayland_display);
+	lock_surface->pending_serial = serial;
+	ext_session_lock_surface_v1_send_configure(lock_surface->resource, serial,
+	                                            output ? output->width : 1920,
+	                                            output ? output->height : 1080);
+}
+
+static void session_lock_unlock_and_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	owl_session_lock *lock = wl_resource_get_user_data(resource);
+	if (!lock) return;
+
+	if (!lock->locked) {
+		wl_resource_post_error(resource, EXT_SESSION_LOCK_V1_ERROR_INVALID_UNLOCK,
+		                       "cannot unlock before locked event");
+		return;
+	}
+
+	owl_display *display = lock->display;
+	display->locked = false;
+	display->session_lock = NULL;
+
+	wl_resource_destroy(resource);
+}
+
+static const struct ext_session_lock_v1_interface session_lock_impl = {
+	.destroy = session_lock_destroy,
+	.get_lock_surface = session_lock_get_lock_surface,
+	.unlock_and_destroy = session_lock_unlock_and_destroy,
+};
+
+static void session_lock_manager_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void session_lock_manager_lock(struct wl_client *client,
+                                       struct wl_resource *resource,
+                                       uint32_t id) {
+	owl_display *display = wl_resource_get_user_data(resource);
+
+	if (display->session_lock) {
+		struct wl_resource *lock_resource = wl_resource_create(client,
+			&ext_session_lock_v1_interface, 1, id);
+		if (lock_resource) {
+			wl_resource_set_implementation(lock_resource, &session_lock_impl, NULL, NULL);
+			ext_session_lock_v1_send_finished(lock_resource);
+		}
+		return;
+	}
+
+	owl_session_lock *lock = calloc(1, sizeof(owl_session_lock));
+	if (!lock) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	lock->display = display;
+
+	lock->resource = wl_resource_create(client, &ext_session_lock_v1_interface, 1, id);
+	if (!lock->resource) {
+		free(lock);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(lock->resource, &session_lock_impl, lock, session_lock_destroy_handler);
+
+	display->session_lock = lock;
+	display->locked = true;
+	lock->locked = true;
+
+	ext_session_lock_v1_send_locked(lock->resource);
+}
+
+static const struct ext_session_lock_manager_v1_interface session_lock_manager_impl = {
+	.destroy = session_lock_manager_destroy,
+	.lock = session_lock_manager_lock,
+};
+
+static void session_lock_manager_bind(struct wl_client *client, void *data,
+                                       uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	(void)version;
+
+	struct wl_resource *resource = wl_resource_create(client,
+		&ext_session_lock_manager_v1_interface, 1, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(resource, &session_lock_manager_impl, display, NULL);
+}
+
+void owl_session_lock_init(owl_display *display) {
+	display->session_lock_manager_global = wl_global_create(display->wayland_display,
+		&ext_session_lock_manager_v1_interface, 1, display, session_lock_manager_bind);
+
+	if (!display->session_lock_manager_global) {
+		fprintf(stderr, "owl: failed to create session-lock global\n");
+		return;
+	}
+	fprintf(stderr, "owl: session-lock initialized\n");
+}
+
+void owl_session_lock_cleanup(owl_display *display) {
+	if (display->session_lock_manager_global) {
+		wl_global_destroy(display->session_lock_manager_global);
+		display->session_lock_manager_global = NULL;
+	}
+}
+
+bool owl_display_is_locked(owl_display *display) {
+	if (!display) return false;
+	return display->locked;
+}
+
+int owl_get_lock_surface_count(owl_display *display) {
+	if (!display) return 0;
+	return display->lock_surface_count;
+}
+
+owl_surface *owl_get_lock_surface(owl_display *display, int index) {
+	if (!display || index < 0 || index >= display->lock_surface_count) return NULL;
+	owl_session_lock_surface *ls = display->lock_surfaces[index];
+	if (!ls) return NULL;
+	return ls->surface;
+}
+
+void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode) {
+	if (!window) return;
+	window->block_out_from = mode;
+}
+
 owl_display *owl_display_create(void) {
 	owl_display *display = calloc(1, sizeof(owl_display));
 	if (!display) return NULL;
@@ -3905,6 +4218,7 @@ owl_display *owl_display_create(void) {
 	owl_render_init(display);
 	owl_dmabuf_init(display);
 	owl_viewporter_init(display);
+	owl_session_lock_init(display);
 
 	wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
 
@@ -3916,6 +4230,7 @@ owl_display *owl_display_create(void) {
 void owl_display_destroy(owl_display *display) {
 	if (!display) return;
 
+	owl_session_lock_cleanup(display);
 	owl_render_cleanup(display);
 	owl_primary_selection_cleanup(display);
 	owl_screencopy_cleanup(display);
