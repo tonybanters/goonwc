@@ -115,9 +115,11 @@ static void handle_keyboard_key(owl_display *display, struct libinput_event_keyb
     owl_input_event event_type = state == LIBINPUT_KEY_STATE_PRESSED
         ? OWL_INPUT_EVENT_KEY_PRESS : OWL_INPUT_EVENT_KEY_RELEASE;
 
-    bool handled = owl_invoke_input_callback(display, event_type, &input);
+    bool handled = false;
+    if (!display->locked) {
+        handled = owl_invoke_input_callback(display, event_type, &input);
+    }
 
-    /* only forward key to client if not consumed by compositor */
     if (!handled) {
         uint32_t wl_state = state == LIBINPUT_KEY_STATE_PRESSED
             ? WL_KEYBOARD_KEY_STATE_PRESSED : WL_KEYBOARD_KEY_STATE_RELEASED;
@@ -198,18 +200,26 @@ static void update_pointer_focus(owl_display *display) {
     owl_surface *surface = NULL;
     double local_x = 0, local_y = 0;
 
-    int ls_x, ls_y;
-    owl_layer_surface *ls = find_layer_surface_at(display, px, py, &ls_x, &ls_y);
-    if (ls) {
-        surface = ls->surface;
-        local_x = px - ls_x;
-        local_y = py - ls_y;
+    if (display->locked) {
+        if (display->lock_surface_count > 0 && display->lock_surfaces[0]) {
+            surface = display->lock_surfaces[0]->surface;
+            local_x = px;
+            local_y = py;
+        }
     } else {
-        owl_window *window = find_window_at(display, px, py);
-        if (window) {
-            surface = window->surface;
-            local_x = px - window->x;
-            local_y = py - window->y;
+        int ls_x, ls_y;
+        owl_layer_surface *ls = find_layer_surface_at(display, px, py, &ls_x, &ls_y);
+        if (ls) {
+            surface = ls->surface;
+            local_x = px - ls_x;
+            local_y = py - ls_y;
+        } else {
+            owl_window *window = find_window_at(display, px, py);
+            if (window) {
+                surface = window->surface;
+                local_x = px - window->x;
+                local_y = py - window->y;
+            }
         }
     }
 

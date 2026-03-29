@@ -431,11 +431,28 @@ static void surface_state_cleanup(owl_surface_state *state) {
 	}
 }
 
+static owl_window *find_window_for_surface(owl_display *display, owl_surface *surface);
+static owl_layer_surface *find_layer_surface_for_surface(owl_display *display, owl_surface *surface);
+
 static void surface_destroy_handler(struct wl_resource *resource) {
 	owl_surface *surface = wl_resource_get_user_data(resource);
 	if (!surface) return;
 
 	owl_display *display = surface->display;
+
+	owl_window *window = find_window_for_surface(display, surface);
+	if (window) {
+		window->surface = NULL;
+		if (window->xdg_surface_resource)
+			wl_resource_destroy(window->xdg_surface_resource);
+	}
+
+	owl_layer_surface *ls = find_layer_surface_for_surface(display, surface);
+	if (ls) {
+		ls->surface = NULL;
+		if (ls->layer_surface_resource)
+			wl_resource_destroy(ls->layer_surface_resource);
+	}
 
 	if (display->cursor_surface == surface)
 		display->cursor_surface = NULL;
@@ -3997,6 +4014,8 @@ static void session_lock_get_lock_surface(struct wl_client *client,
 		display->lock_surfaces[display->lock_surface_count++] = lock_surface;
 	}
 
+	owl_seat_set_keyboard_focus(display, surface);
+
 	uint32_t serial = wl_display_next_serial(display->wayland_display);
 	lock_surface->pending_serial = serial;
 	ext_session_lock_surface_v1_send_configure(lock_surface->resource, serial,
@@ -4113,6 +4132,18 @@ void owl_session_lock_cleanup(owl_display *display) {
 bool owl_display_is_locked(owl_display *display) {
 	if (!display) return false;
 	return display->locked;
+}
+
+int owl_get_lock_surface_count(owl_display *display) {
+	if (!display) return 0;
+	return display->lock_surface_count;
+}
+
+owl_surface *owl_get_lock_surface(owl_display *display, int index) {
+	if (!display || index < 0 || index >= display->lock_surface_count) return NULL;
+	owl_session_lock_surface *ls = display->lock_surfaces[index];
+	if (!ls) return NULL;
+	return ls->surface;
 }
 
 void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode) {

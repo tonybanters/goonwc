@@ -525,6 +525,7 @@ uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface) {
 		surface->texture_width = buffer->width;
 		surface->texture_height = buffer->height;
 		wl_buffer_send_release(buffer->resource);
+		surface->current.buffer = NULL;
 		return surface->texture_id;
 	}
 
@@ -559,6 +560,7 @@ uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface) {
 	glBindTexture(GL_TEXTURE_2D, 0);
 
 	wl_buffer_send_release(buffer->resource);
+	surface->current.buffer = NULL;
 
 	return surface->texture_id;
 }
@@ -705,25 +707,34 @@ void owl_render_frame(owl_display *display, owl_output *output) {
     glUseProgram(shader_program);
     glUniform2f(uniform_screen_size, (float)output->width, (float)output->height);
 
-    render_layer_surfaces(display, output, OWL_LAYER_BACKGROUND);
-    render_layer_surfaces(display, output, OWL_LAYER_BOTTOM);
-
-    owl_window *window;
-    wl_list_for_each_reverse(window, &display->windows, link) {
-        if (window->mapped && window->surface && window->surface->has_content) {
-            if (display->render_callback) {
-                display->render_callback(display, window, display->render_callback_data);
-            }
-            if (should_block_out(display->current_render_target, window->block_out_from)) {
-                owl_render_rect(window->x, window->y, window->width, window->height, 0.0f, 0.0f, 0.0f, 1.0f);
-            } else {
-                owl_render_surface(display, window->surface, window->x, window->y);
+    if (display->locked) {
+        for (int i = 0; i < display->lock_surface_count; i++) {
+            owl_session_lock_surface *ls = display->lock_surfaces[i];
+            if (ls && ls->surface && ls->surface->has_content) {
+                owl_render_surface(display, ls->surface, 0, 0);
             }
         }
-    }
+    } else {
+        render_layer_surfaces(display, output, OWL_LAYER_BACKGROUND);
+        render_layer_surfaces(display, output, OWL_LAYER_BOTTOM);
 
-    render_layer_surfaces(display, output, OWL_LAYER_TOP);
-    render_layer_surfaces(display, output, OWL_LAYER_OVERLAY);
+        owl_window *window;
+        wl_list_for_each_reverse(window, &display->windows, link) {
+            if (window->mapped && window->surface && window->surface->has_content) {
+                if (display->render_callback) {
+                    display->render_callback(display, window, display->render_callback_data);
+                }
+                if (should_block_out(display->current_render_target, window->block_out_from)) {
+                    owl_render_rect(window->x, window->y, window->width, window->height, 0.0f, 0.0f, 0.0f, 1.0f);
+                } else {
+                    owl_render_surface(display, window->surface, window->x, window->y);
+                }
+            }
+        }
+
+        render_layer_surfaces(display, output, OWL_LAYER_TOP);
+        render_layer_surfaces(display, output, OWL_LAYER_OVERLAY);
+    }
 
     if (display->cursor_surface && display->cursor_surface->has_content) {
         int cursor_x = (int)display->pointer_x - display->cursor_hotspot_x;
@@ -742,19 +753,20 @@ void owl_render_frame(owl_display *display, owl_output *output) {
         }
     }
 
-    if (has_pending_screencopy) {
+    if (has_pending_screencopy && !display->locked) {
         display->current_render_target = OWL_RENDER_TARGET_SCREENSHOT;
 
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glUseProgram(shader_program);
 
-        wl_list_for_each_reverse(window, &display->windows, link) {
-            if (window->mapped && window->surface && window->surface->has_content) {
-                if (should_block_out(display->current_render_target, window->block_out_from)) {
-                    owl_render_rect(window->x, window->y, window->width, window->height, 0.0f, 0.0f, 0.0f, 1.0f);
+        owl_window *sc_window;
+        wl_list_for_each_reverse(sc_window, &display->windows, link) {
+            if (sc_window->mapped && sc_window->surface && sc_window->surface->has_content) {
+                if (should_block_out(display->current_render_target, sc_window->block_out_from)) {
+                    owl_render_rect(sc_window->x, sc_window->y, sc_window->width, sc_window->height, 0.0f, 0.0f, 0.0f, 1.0f);
                 } else {
-                    owl_render_surface(display, window->surface, window->x, window->y);
+                    owl_render_surface(display, sc_window->surface, sc_window->x, sc_window->y);
                 }
             }
         }
@@ -774,9 +786,9 @@ void owl_render_frame(owl_display *display, owl_output *output) {
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glUseProgram(shader_program);
 
-        wl_list_for_each_reverse(window, &display->windows, link) {
-            if (window->mapped && window->surface && window->surface->has_content) {
-                owl_render_surface(display, window->surface, window->x, window->y);
+        wl_list_for_each_reverse(sc_window, &display->windows, link) {
+            if (sc_window->mapped && sc_window->surface && sc_window->surface->has_content) {
+                owl_render_surface(display, sc_window->surface, sc_window->x, sc_window->y);
             }
         }
 

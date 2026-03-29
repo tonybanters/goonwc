@@ -865,9 +865,6 @@ void server_run(dwc_server *server, const char *startup_cmd) {
 }
 
 void server_cleanup(dwc_server *server) {
-	while (server->toplevels) {
-		toplevel_destroy(server->toplevels);
-	}
 	owl_display_destroy(server->display);
 }
 

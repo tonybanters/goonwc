@@ -287,6 +287,8 @@ void owl_set_keyboard_repeat(owl_display *display, int32_t rate, int32_t delay);
 
 /* Session lock */
 bool owl_display_is_locked(owl_display *display);
+int owl_get_lock_surface_count(owl_display *display);
+owl_surface *owl_get_lock_surface(owl_display *display, int index);
 
 /* Capture block */
 void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode);
