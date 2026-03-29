@@ -285,8 +285,8 @@ void owl_set_render_callback(owl_display *display, owl_render_callback callback,
 /* Keyboard settings */
 void owl_set_keyboard_repeat(owl_display *display, int32_t rate, int32_t delay);
 
-/* Idle inhibit */
-bool owl_display_is_idle_inhibited(owl_display *display);
+/* Session lock */
+bool owl_display_is_locked(owl_display *display);
 
 /* Capture block */
 void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode);

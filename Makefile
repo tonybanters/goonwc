@@ -45,20 +45,24 @@ VIEWPORTER_XML = lib/owl/protocols/viewporter.xml
 VIEWPORTER_H = build/viewporter-protocol.h
 VIEWPORTER_C = build/viewporter-protocol.c
 
-IDLE_INHIBIT_XML = lib/owl/protocols/idle-inhibit-unstable-v1.xml
-IDLE_INHIBIT_H = build/idle-inhibit-unstable-v1-protocol.h
-IDLE_INHIBIT_C = build/idle-inhibit-unstable-v1-protocol.c
+SESSION_LOCK_XML = lib/owl/protocols/ext-session-lock-v1.xml
+SESSION_LOCK_H = build/ext-session-lock-v1-protocol.h
+SESSION_LOCK_C = build/ext-session-lock-v1-protocol.c
 
 ALL_SRC = $(DWC_SRC) $(OWL_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
 TARGET = dwc
 
-.PHONY: all clean
+.PHONY: all clean debug
 
 all: $(TARGET)
 
-$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C) $(VIEWPORTER_H) $(VIEWPORTER_C) $(IDLE_INHIBIT_H) $(IDLE_INHIBIT_C) $(OBJ)
+debug: CFLAGS += -fsanitize=address -fno-omit-frame-pointer -g
+debug: LDFLAGS += -fsanitize=address
+debug: $(TARGET)
+
+$(TARGET): $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C) $(VIEWPORTER_H) $(VIEWPORTER_C) $(SESSION_LOCK_H) $(SESSION_LOCK_C) $(OBJ)
 	$(CC) $(OBJ) -o $@ $(LDFLAGS)
 
 build:
@@ -118,13 +122,13 @@ $(VIEWPORTER_H): $(VIEWPORTER_XML) | build
 $(VIEWPORTER_C): $(VIEWPORTER_XML) | build
 	wayland-scanner private-code $< $@
 
-$(IDLE_INHIBIT_H): $(IDLE_INHIBIT_XML) | build
+$(SESSION_LOCK_H): $(SESSION_LOCK_XML) | build
 	wayland-scanner server-header $< $@
 
-$(IDLE_INHIBIT_C): $(IDLE_INHIBIT_XML) | build
+$(SESSION_LOCK_C): $(SESSION_LOCK_XML) | build
 	wayland-scanner private-code $< $@
 
-%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C) $(VIEWPORTER_H) $(VIEWPORTER_C) $(IDLE_INHIBIT_H) $(IDLE_INHIBIT_C)
+%.o: %.c $(PROTOCOL_H) $(PROTOCOL_C) $(LAYER_SHELL_H) $(LAYER_SHELL_C) $(XDG_OUTPUT_H) $(XDG_OUTPUT_C) $(EXT_WORKSPACE_H) $(EXT_WORKSPACE_C) $(XDG_DECORATION_H) $(XDG_DECORATION_C) $(SCREENCOPY_H) $(SCREENCOPY_C) $(PRIMARY_SEL_H) $(PRIMARY_SEL_C) $(LINUX_DMABUF_H) $(LINUX_DMABUF_C) $(VIEWPORTER_H) $(VIEWPORTER_C) $(SESSION_LOCK_H) $(SESSION_LOCK_C)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

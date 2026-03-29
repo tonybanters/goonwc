@@ -181,6 +181,7 @@ typedef struct owl_data_source {
 	uint32_t dnd_actions;
 	uint32_t current_dnd_action;
 	bool actions_set;
+	struct wl_list offers;
 } owl_data_source;
 
 typedef struct owl_data_offer {
@@ -190,6 +191,7 @@ typedef struct owl_data_offer {
 	uint32_t dnd_actions;
 	uint32_t preferred_dnd_action;
 	bool in_ask;
+	struct wl_list link;
 } owl_data_offer;
 
 typedef struct owl_primary_source {
@@ -197,12 +199,14 @@ typedef struct owl_primary_source {
 	struct wl_resource *resource;
 	char *mime_types[OWL_MAX_MIME_TYPES];
 	int mime_type_count;
+	struct wl_list offers;
 } owl_primary_source;
 
 typedef struct owl_primary_offer {
 	owl_display *display;
 	struct wl_resource *resource;
 	owl_primary_source *source;
+	struct wl_list link;
 } owl_primary_offer;
 
 typedef struct owl_drag {
@@ -217,12 +221,23 @@ typedef struct owl_drag {
 	bool active;
 } owl_drag;
 
-typedef struct owl_idle_inhibitor {
+typedef struct owl_session_lock {
 	owl_display *display;
 	struct wl_resource *resource;
+	bool locked;
+} owl_session_lock;
+
+typedef struct owl_session_lock_surface {
+	owl_display *display;
+	owl_session_lock *lock;
+	struct wl_resource *resource;
 	owl_surface *surface;
-	struct wl_list link;
-} owl_idle_inhibitor;
+	owl_output *output;
+	uint32_t pending_serial;
+	bool configured;
+} owl_session_lock_surface;
+
+#define OWL_MAX_LOCK_SURFACES 8
 
 typedef struct owl_data_device {
 	owl_display *display;
@@ -342,9 +357,11 @@ struct owl_display {
 
 	struct wl_global *viewporter_global;
 
-	struct wl_global *idle_inhibit_manager_global;
-	struct wl_list idle_inhibitors;
-	int idle_inhibitor_count;
+	struct wl_global *session_lock_manager_global;
+	owl_session_lock *session_lock;
+	owl_session_lock_surface *lock_surfaces[OWL_MAX_LOCK_SURFACES];
+	int lock_surface_count;
+	bool locked;
 
 	owl_render_target current_render_target;
 };
@@ -428,7 +445,7 @@ void owl_dmabuf_cleanup(owl_display *display);
 bool owl_dmabuf_import(owl_display *display, owl_dmabuf_buffer *buffer);
 void owl_dmabuf_buffer_destroy(owl_dmabuf_buffer *buffer);
 
-void owl_idle_inhibit_init(owl_display *display);
-void owl_idle_inhibit_cleanup(owl_display *display);
+void owl_session_lock_init(owl_display *display);
+void owl_session_lock_cleanup(owl_display *display);
 
 #endif
