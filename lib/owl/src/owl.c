@@ -43,6 +43,8 @@
 #include "linux-dmabuf-unstable-v1-protocol.c"
 #include "viewporter-protocol.h"
 #include "viewporter-protocol.c"
+#include "idle-inhibit-unstable-v1-protocol.h"
+#include "idle-inhibit-unstable-v1-protocol.c"
 #include <drm_fourcc.h>
 
 /* ==========================================================================
@@ -3838,6 +3840,106 @@ static void owl_viewporter_init(owl_display *display) {
 	fprintf(stderr, "owl: viewporter initialized\n");
 }
 
+static void idle_inhibitor_destroy_handler(struct wl_resource *resource) {
+	owl_idle_inhibitor *inhibitor = wl_resource_get_user_data(resource);
+	if (!inhibitor) return;
+
+	wl_list_remove(&inhibitor->link);
+	inhibitor->display->idle_inhibitor_count--;
+	free(inhibitor);
+}
+
+static void idle_inhibitor_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static const struct zwp_idle_inhibitor_v1_interface idle_inhibitor_impl = {
+	.destroy = idle_inhibitor_destroy,
+};
+
+static void idle_inhibit_manager_destroy(struct wl_client *client, struct wl_resource *resource) {
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void idle_inhibit_manager_create_inhibitor(struct wl_client *client,
+                                                   struct wl_resource *resource,
+                                                   uint32_t id,
+                                                   struct wl_resource *surface_resource) {
+	owl_display *display = wl_resource_get_user_data(resource);
+	owl_surface *surface = owl_surface_from_resource(surface_resource);
+
+	owl_idle_inhibitor *inhibitor = calloc(1, sizeof(owl_idle_inhibitor));
+	if (!inhibitor) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	inhibitor->display = display;
+	inhibitor->surface = surface;
+
+	inhibitor->resource = wl_resource_create(client, &zwp_idle_inhibitor_v1_interface, 1, id);
+	if (!inhibitor->resource) {
+		free(inhibitor);
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(inhibitor->resource, &idle_inhibitor_impl, inhibitor, idle_inhibitor_destroy_handler);
+	wl_list_insert(&display->idle_inhibitors, &inhibitor->link);
+	display->idle_inhibitor_count++;
+}
+
+static const struct zwp_idle_inhibit_manager_v1_interface idle_inhibit_manager_impl = {
+	.destroy = idle_inhibit_manager_destroy,
+	.create_inhibitor = idle_inhibit_manager_create_inhibitor,
+};
+
+static void idle_inhibit_manager_bind(struct wl_client *client, void *data,
+                                       uint32_t version, uint32_t id) {
+	owl_display *display = data;
+	(void)version;
+
+	struct wl_resource *resource = wl_resource_create(client, &zwp_idle_inhibit_manager_v1_interface, 1, id);
+	if (!resource) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	wl_resource_set_implementation(resource, &idle_inhibit_manager_impl, display, NULL);
+}
+
+void owl_idle_inhibit_init(owl_display *display) {
+	wl_list_init(&display->idle_inhibitors);
+
+	display->idle_inhibit_manager_global = wl_global_create(display->wayland_display,
+		&zwp_idle_inhibit_manager_v1_interface, 1, display, idle_inhibit_manager_bind);
+
+	if (!display->idle_inhibit_manager_global) {
+		fprintf(stderr, "owl: failed to create idle-inhibit global\n");
+		return;
+	}
+	fprintf(stderr, "owl: idle-inhibit initialized\n");
+}
+
+void owl_idle_inhibit_cleanup(owl_display *display) {
+	if (display->idle_inhibit_manager_global) {
+		wl_global_destroy(display->idle_inhibit_manager_global);
+		display->idle_inhibit_manager_global = NULL;
+	}
+}
+
+bool owl_display_is_idle_inhibited(owl_display *display) {
+	if (!display) return false;
+	return display->idle_inhibitor_count > 0;
+}
+
+void owl_window_set_block_out_from(owl_window *window, owl_block_out_from mode) {
+	if (!window) return;
+	window->block_out_from = mode;
+}
+
 owl_display *owl_display_create(void) {
 	owl_display *display = calloc(1, sizeof(owl_display));
 	if (!display) return NULL;
@@ -3905,6 +4007,7 @@ owl_display *owl_display_create(void) {
 	owl_render_init(display);
 	owl_dmabuf_init(display);
 	owl_viewporter_init(display);
+	owl_idle_inhibit_init(display);
 
 	wl_display_add_client_created_listener(display->wayland_display, &client_created_listener);
 
@@ -3916,6 +4019,7 @@ owl_display *owl_display_create(void) {
 void owl_display_destroy(owl_display *display) {
 	if (!display) return;
 
+	owl_idle_inhibit_cleanup(display);
 	owl_render_cleanup(display);
 	owl_primary_selection_cleanup(display);
 	owl_screencopy_cleanup(display);

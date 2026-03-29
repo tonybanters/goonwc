@@ -563,6 +563,13 @@ uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface) {
 	return surface->texture_id;
 }
 
+static bool should_block_out(owl_render_target target, owl_block_out_from block) {
+	if (block == OWL_BLOCK_OUT_NONE) return false;
+	if (block == OWL_BLOCK_OUT_SCREENCAST && target == OWL_RENDER_TARGET_SCREENCAST) return true;
+	if (block == OWL_BLOCK_OUT_SCREEN_CAPTURE && target != OWL_RENDER_TARGET_OUTPUT) return true;
+	return false;
+}
+
 void owl_render_surface(owl_display *display, owl_surface *surface, int x, int y) {
 	(void)display;
 
@@ -677,6 +684,8 @@ void owl_render_frame(owl_display *display, owl_output *output) {
         return;
     }
 
+    display->current_render_target = OWL_RENDER_TARGET_OUTPUT;
+
     if (!eglMakeCurrent(display->egl_display, output->egl_surface,
                         output->egl_surface, display->egl_context)) {
         fprintf(stderr, "owl: failed to make EGL context current\n");
@@ -705,7 +714,11 @@ void owl_render_frame(owl_display *display, owl_output *output) {
             if (display->render_callback) {
                 display->render_callback(display, window, display->render_callback_data);
             }
-            owl_render_surface(display, window->surface, window->x, window->y);
+            if (should_block_out(display->current_render_target, window->block_out_from)) {
+                owl_render_rect(window->x, window->y, window->width, window->height, 0.0f, 0.0f, 0.0f, 1.0f);
+            } else {
+                owl_render_surface(display, window->surface, window->x, window->y);
+            }
         }
     }
 
@@ -720,12 +733,54 @@ void owl_render_frame(owl_display *display, owl_output *output) {
 
     glDisable(GL_BLEND);
 
-    // Process pending screencopy frames after rendering, before swap
+    bool has_pending_screencopy = false;
     for (int i = 0; i < display->screencopy_frame_count; i++) {
         owl_screencopy_frame *frame = display->screencopy_frames[i];
         if (frame && frame->state == OWL_SCREENCOPY_FRAME_COPYING && frame->output == output) {
-            owl_screencopy_do_copy(frame);
+            has_pending_screencopy = true;
+            break;
         }
+    }
+
+    if (has_pending_screencopy) {
+        display->current_render_target = OWL_RENDER_TARGET_SCREENSHOT;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glUseProgram(shader_program);
+
+        wl_list_for_each_reverse(window, &display->windows, link) {
+            if (window->mapped && window->surface && window->surface->has_content) {
+                if (should_block_out(display->current_render_target, window->block_out_from)) {
+                    owl_render_rect(window->x, window->y, window->width, window->height, 0.0f, 0.0f, 0.0f, 1.0f);
+                } else {
+                    owl_render_surface(display, window->surface, window->x, window->y);
+                }
+            }
+        }
+
+        glDisable(GL_BLEND);
+
+        for (int i = 0; i < display->screencopy_frame_count; i++) {
+            owl_screencopy_frame *frame = display->screencopy_frames[i];
+            if (frame && frame->state == OWL_SCREENCOPY_FRAME_COPYING && frame->output == output) {
+                owl_screencopy_do_copy(frame);
+            }
+        }
+
+        display->current_render_target = OWL_RENDER_TARGET_OUTPUT;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glUseProgram(shader_program);
+
+        wl_list_for_each_reverse(window, &display->windows, link) {
+            if (window->mapped && window->surface && window->surface->has_content) {
+                owl_render_surface(display, window->surface, window->x, window->y);
+            }
+        }
+
+        glDisable(GL_BLEND);
     }
 
     if (!eglSwapBuffers(display->egl_display, output->egl_surface)) {

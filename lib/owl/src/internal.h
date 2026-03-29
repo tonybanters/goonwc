@@ -217,6 +217,13 @@ typedef struct owl_drag {
 	bool active;
 } owl_drag;
 
+typedef struct owl_idle_inhibitor {
+	owl_display *display;
+	struct wl_resource *resource;
+	owl_surface *surface;
+	struct wl_list link;
+} owl_idle_inhibitor;
+
 typedef struct owl_data_device {
 	owl_display *display;
 	struct wl_resource *resource;
@@ -334,6 +341,12 @@ struct owl_display {
 	bool dmabuf_import_supported;
 
 	struct wl_global *viewporter_global;
+
+	struct wl_global *idle_inhibit_manager_global;
+	struct wl_list idle_inhibitors;
+	int idle_inhibitor_count;
+
+	owl_render_target current_render_target;
 };
 
 /* Internal functions */
@@ -414,5 +427,8 @@ void owl_dmabuf_init(owl_display *display);
 void owl_dmabuf_cleanup(owl_display *display);
 bool owl_dmabuf_import(owl_display *display, owl_dmabuf_buffer *buffer);
 void owl_dmabuf_buffer_destroy(owl_dmabuf_buffer *buffer);
+
+void owl_idle_inhibit_init(owl_display *display);
+void owl_idle_inhibit_cleanup(owl_display *display);
 
 #endif
