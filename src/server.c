@@ -216,7 +216,7 @@ void arrange_internal(dwc_server *server, bool adjust_scroll) {
 	rect area = get_usable_area(server);
 	if (area.w <= 0 || area.h <= 0) return;
 
-	int g = gap;
+	int g = server->config.gap;
 	dwc_toplevel *t;
 
 	/* move invisible windows offscreen */
@@ -311,30 +311,28 @@ void arrange(dwc_server *server) {
 }
 
 /* keybinding action functions */
-void spawn(void *arg) {
-	arg_cmd *a = arg;
+static void spawn_cmd(dwc_server *server, const char *cmd) {
 	if (fork() == 0) {
 		setsid();
-		setenv("WAYLAND_DISPLAY", owl_display_get_socket(g_server->display), 1);
+		setenv("WAYLAND_DISPLAY", owl_display_get_socket(server->display), 1);
 		setenv("XDG_SESSION_TYPE", "wayland", 1);
 		setenv("XDG_CURRENT_DESKTOP", "dwc", 1);
 		setenv("TERM", "xterm-256color", 1);
 		setenv("COLORTERM", "truecolor", 1);
-		execvp(a->cmd[0], (char *const *)a->cmd);
+		execl("/bin/sh", "/bin/sh", "-c", cmd, NULL);
 		_exit(1);
 	}
 }
 
-void killclient(void *arg) {
-	(void)arg;
-	if (g_server->focused_tiled) {
-		owl_window_close(g_server->focused_tiled->window);
-	}
+static void spawn_terminal(dwc_server *server) {
+	const char *term = server->config.terminal ? server->config.terminal : "foot";
+	spawn_cmd(server, term);
 }
 
-void quit(void *arg) {
-	(void)arg;
-	owl_display_terminate(g_server->display);
+static void killclient(dwc_server *server) {
+	if (server->focused_tiled) {
+		owl_window_close(server->focused_tiled->window);
+	}
 }
 
 static void update_workspace_states(dwc_server *server) {
@@ -347,14 +345,13 @@ static void update_workspace_states(dwc_server *server) {
 	owl_workspace_commit(server->display);
 }
 
-void view(void *arg) {
-	arg_tag *a = arg;
-	if (a->tag == g_server->tagset) return;
-	g_server->tagset = a->tag;
-	update_workspace_states(g_server);
-	arrange(g_server);
-	dwc_toplevel *t;
-	for (t = g_server->toplevels; t; t = t->next) {
+static void view_tag(dwc_server *server, int tag_idx) {
+	unsigned int tag = 1 << tag_idx;
+	if (tag == server->tagset) return;
+	server->tagset = tag;
+	update_workspace_states(server);
+	arrange(server);
+	for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
 		if (is_visible(t)) {
 			toplevel_focus(t);
 			break;
@@ -362,14 +359,12 @@ void view(void *arg) {
 	}
 }
 
-void tag(void *arg) {
-	arg_tag *a = arg;
-	if (!g_server->focused_tiled) return;
-	g_server->focused_tiled->tags = a->tag;
-	arrange(g_server);
-	if (!is_visible(g_server->focused_tiled)) {
-		dwc_toplevel *t;
-		for (t = g_server->toplevels; t; t = t->next) {
+static void move_to_tag(dwc_server *server, int tag_idx) {
+	if (!server->focused_tiled) return;
+	server->focused_tiled->tags = 1 << tag_idx;
+	arrange(server);
+	if (!is_visible(server->focused_tiled)) {
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_visible(t)) {
 				toplevel_focus(t);
 				break;
@@ -378,131 +373,97 @@ void tag(void *arg) {
 	}
 }
 
-void toggleview(void *arg) {
-	arg_tag *a = arg;
-	unsigned int newtagset = g_server->tagset ^ a->tag;
+static void toggle_view_tag(dwc_server *server, int tag_idx) {
+	unsigned int newtagset = server->tagset ^ (1 << tag_idx);
 	if (newtagset) {
-		g_server->tagset = newtagset;
-		arrange(g_server);
+		server->tagset = newtagset;
+		arrange(server);
 	}
 }
 
-void toggletag(void *arg) {
-	arg_tag *a = arg;
-	if (!g_server->focused_tiled) return;
-	unsigned int newtags = g_server->focused_tiled->tags ^ a->tag;
+static void toggle_tag(dwc_server *server, int tag_idx) {
+	if (!server->focused_tiled) return;
+	unsigned int newtags = server->focused_tiled->tags ^ (1 << tag_idx);
 	if (newtags) {
-		g_server->focused_tiled->tags = newtags;
-		arrange(g_server);
+		server->focused_tiled->tags = newtags;
+		arrange(server);
 	}
 }
 
-void focusstack(void *arg) {
-	arg_int *a = arg;
-	if (!g_server->focused_tiled) return;
-
-	dwc_toplevel *t = g_server->focused_tiled;
+static void focus_next(dwc_server *server) {
+	if (!server->focused_tiled) return;
 	dwc_toplevel *target = NULL;
-
-	if (a->i > 0) {
-		/* focus next */
-		for (t = t->next; t; t = t->next) {
-			if (is_visible(t)) {
-				target = t;
-				break;
-			}
-		}
-		/* wrap around to start */
-		if (!target) {
-			for (t = g_server->toplevels; t; t = t->next) {
-				if (is_visible(t)) {
-					target = t;
-					break;
-				}
-			}
-		}
-	} else {
-		/* focus prev */
-		for (t = t->prev; t; t = t->prev) {
-			if (is_visible(t)) {
-				target = t;
-				break;
-			}
-		}
-		/* wrap around to end */
-		if (!target) {
-			for (t = g_server->toplevels; t; t = t->next) {
-				if (is_visible(t)) target = t;
-			}
+	for (dwc_toplevel *t = server->focused_tiled->next; t; t = t->next) {
+		if (is_visible(t)) { target = t; break; }
+	}
+	if (!target) {
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+			if (is_visible(t)) { target = t; break; }
 		}
 	}
-
-	if (target && target != g_server->focused_tiled) {
+	if (target && target != server->focused_tiled) {
 		toplevel_focus(target);
-		arrange(g_server);
+		arrange(server);
 	}
 }
 
-/**
- * toggle_width() - cycle through width presets (niri-style)
- * presets: 1/3, 1/2, 2/3 (wraps around)
- */
-void toggle_width(void *arg) {
-	arg_int *a = arg;
-	if (!g_server->focused_tiled) return;
-	dwc_toplevel *t = g_server->focused_tiled;
+static void focus_prev(dwc_server *server) {
+	if (!server->focused_tiled) return;
+	dwc_toplevel *target = NULL;
+	for (dwc_toplevel *t = server->focused_tiled->prev; t; t = t->prev) {
+		if (is_visible(t)) { target = t; break; }
+	}
+	if (!target) {
+		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+			if (is_visible(t)) target = t;
+		}
+	}
+	if (target && target != server->focused_tiled) {
+		toplevel_focus(target);
+		arrange(server);
+	}
+}
 
-	int dir = (a && a->i < 0) ? -1 : 1;
+static void toggle_width(dwc_server *server, int dir) {
+	if (!server->focused_tiled) return;
+	dwc_toplevel *t = server->focused_tiled;
+
 	t->preset_index += dir;
-
-	/* wrap around */
 	if (t->preset_index >= DWC_PRESET_COUNT) t->preset_index = 0;
 	if (t->preset_index < 0) t->preset_index = DWC_PRESET_COUNT - 1;
 
 	t->width.type = DWC_WIDTH_PROPORTION;
 	t->width.value = dwc_width_presets[t->preset_index];
-	arrange(g_server);
+	arrange(server);
 }
 
-/**
- * maximize() - set width to full screen (1.0)
- */
-void maximize(void *arg) {
-	(void)arg;
-	if (!g_server->focused_tiled) return;
-	dwc_toplevel *t = g_server->focused_tiled;
+static void maximize(dwc_server *server) {
+	if (!server->focused_tiled) return;
+	dwc_toplevel *t = server->focused_tiled;
 
-	/* toggle between full width and default preset */
 	if (t->width.type == DWC_WIDTH_PROPORTION && t->width.value >= 0.99f) {
-		/* restore to 1/2 (middle preset) */
 		t->preset_index = 1;
 		t->width.value = dwc_width_presets[1];
 	} else {
-		/* set to full */
-		t->preset_index = -1; /* not a preset */
+		t->preset_index = -1;
 		t->width.type = DWC_WIDTH_PROPORTION;
 		t->width.value = 1.0f;
 	}
-	arrange(g_server);
+	arrange(server);
 }
 
-/**
- * togglefloating() - move window between tiled and floating space
- * TODO: implement once floating space is fully set up
- */
-void togglefloating(void *arg) {
-	(void)arg;
-	/* TODO: move window from toplevels to floating list or vice versa */
+static void togglefloating(dwc_server *server) {
+	(void)server;
 }
 
 
 /* callbacks */
-static bool should_block_capture(const char *app_id) {
+static bool should_block_capture(dwc_server *server, const char *app_id) {
 	if (!app_id) return false;
-	for (int i = 0; block_screen_capture[i]; i++) {
-		if (strcmp(app_id, block_screen_capture[i]) == 0) {
+	for (int i = 0; i < server->config.window_rule_count; i++) {
+		dwc_window_rule *rule = &server->config.window_rules[i];
+		if (rule->block_screen_capture && rule->app_id && strcmp(app_id, rule->app_id) == 0)
 			return true;
-		}
 	}
 	return false;
 }
@@ -520,8 +481,8 @@ static void on_window_create(owl_display *display, owl_window *window, void *dat
 
 static void on_window_map(owl_display *display, owl_window *window, void *data) {
 	(void)display;
-	(void)data;
-	if (should_block_capture(window->app_id)) {
+	dwc_server *server = data;
+	if (should_block_capture(server, window->app_id)) {
 		owl_window_set_block_out_from(window, OWL_BLOCK_OUT_SCREEN_CAPTURE);
 	}
 }
@@ -607,9 +568,7 @@ static void on_workspace_activate(owl_display *display, owl_workspace *workspace
 	const char *name = workspace->name;
 	if (name && name[0] >= '1' && name[0] <= '9') {
 		int tag_index = name[0] - '1';
-		arg_tag arg = { .tag = 1u << tag_index };
-		g_server = server;
-		view(&arg);
+		view_tag(server, tag_index);
 	}
 }
 
@@ -631,6 +590,10 @@ static void on_layer_surface_unmap(owl_display *display, owl_layer_surface *surf
 	(void)surface;
 	dwc_server *server = data;
 	arrange(server);
+
+	if (server->focused_tiled) {
+		owl_window_focus(server->focused_tiled->window);
+	}
 }
 
 static void on_render_window(owl_display *display, owl_window *window, void *data) {
@@ -644,9 +607,9 @@ static void on_render_window(owl_display *display, owl_window *window, void *dat
 	int y = window->y;
 	int w = window->width;
 	int h = window->height;
-	int bw = border_width;
+	int bw = server->config.border_width;
 
-	const float *color = (toplevel == server->focused_tiled) ? border_focused : border_unfocused;
+	const float *color = (toplevel == server->focused_tiled) ? server->config.border_focused : server->config.border_unfocused;
 
 	/* top */
 	owl_render_rect(x - bw, y - bw, w + 2 * bw, bw, color[0], color[1], color[2], color[3]);
@@ -677,7 +640,7 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 
 	if (gesture->fingers == 3) {
 		rect area = get_usable_area(server);
-		int g = gap;
+		int g = server->config.gap;
 
 		int total_width = g;
 		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
@@ -753,7 +716,7 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 		server->gesture_active = false;
 
 		rect area = get_usable_area(server);
-		int g = gap;
+		int g = server->config.gap;
 		double velocity = calculate_gesture_velocity(server);
 
 		double decel = 1000.0 * log(DECELERATION_TOUCHPAD);
@@ -803,7 +766,9 @@ bool server_init(dwc_server *server) {
 		return false;
 	}
 
-	owl_set_keyboard_repeat(server->display, repeat_rate, repeat_delay);
+	config_init(server, NULL);
+
+	owl_set_keyboard_repeat(server->display, server->config.repeat_rate, server->config.repeat_delay);
 
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_CREATE, on_window_create, server);
 	owl_set_window_callback(server->display, OWL_WINDOW_EVENT_DESTROY, on_window_destroy, server);
@@ -865,6 +830,7 @@ void server_run(dwc_server *server, const char *startup_cmd) {
 }
 
 void server_cleanup(dwc_server *server) {
+	config_cleanup(server);
 	owl_display_destroy(server->display);
 }
 
@@ -1010,14 +976,58 @@ dwc_toplevel *toplevel_at(dwc_server *server, int x, int y) {
 }
 
 bool handle_keybinding(dwc_server *server, uint32_t keysym, uint32_t modifiers) {
-	(void)server;
-
 	uint32_t relevant_mods = OWL_MOD_SHIFT | OWL_MOD_CTRL | OWL_MOD_ALT | OWL_MOD_SUPER;
 	uint32_t cleaned_mods = modifiers & relevant_mods;
 
-	for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-		if (keys[i].keysym == keysym && keys[i].mod == cleaned_mods) {
-			keys[i].func(keys[i].arg);
+	for (int i = 0; i < server->config.keybind_count; i++) {
+		dwc_keybind *kb = &server->config.keybinds[i];
+		if (kb->key == keysym && kb->mods == cleaned_mods) {
+			switch (kb->action) {
+			case ACTION_SPAWN:
+				spawn_cmd(server, kb->arg.cmd);
+				break;
+			case ACTION_SPAWN_TERMINAL:
+				spawn_terminal(server);
+				break;
+			case ACTION_KILL:
+				killclient(server);
+				break;
+			case ACTION_QUIT:
+				owl_display_terminate(server->display);
+				break;
+			case ACTION_RELOAD_CONFIG:
+				config_reload(server);
+				break;
+			case ACTION_FOCUS_NEXT:
+				focus_next(server);
+				break;
+			case ACTION_FOCUS_PREV:
+				focus_prev(server);
+				break;
+			case ACTION_TOGGLE_WIDTH:
+				toggle_width(server, kb->arg.i);
+				break;
+			case ACTION_MAXIMIZE:
+				maximize(server);
+				break;
+			case ACTION_TOGGLE_FLOATING:
+				togglefloating(server);
+				break;
+			case ACTION_VIEW_TAG:
+				view_tag(server, kb->arg.i);
+				break;
+			case ACTION_MOVE_TO_TAG:
+				move_to_tag(server, kb->arg.i);
+				break;
+			case ACTION_TOGGLE_VIEW_TAG:
+				toggle_view_tag(server, kb->arg.i);
+				break;
+			case ACTION_TOGGLE_TAG:
+				toggle_tag(server, kb->arg.i);
+				break;
+			case ACTION_NONE:
+				break;
+			}
 			return true;
 		}
 	}

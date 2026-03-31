@@ -1,13 +1,14 @@
 CC = gcc
 CFLAGS = -std=c23 -Wall -Wextra -Wno-unused-parameter -D_POSIX_C_SOURCE=200809L
-CFLAGS += -I./include -I./lib/owl/include -I./lib/owl/src -I./build
+CFLAGS += -I./include -I./lib/owl/include -I./lib/owl/src -I./lib/goon -I./build
 LDFLAGS = $(shell pkg-config --libs wayland-server xkbcommon libdrm gbm egl glesv2 libinput libudev)
 CFLAGS += $(shell pkg-config --cflags wayland-server xkbcommon libdrm gbm egl glesv2 libinput libudev)
 
-DWC_SRC = src/main.c src/server.c
+DWC_SRC = src/main.c src/server.c src/config.c
 OWL_SRC = lib/owl/src/owl.c \
           lib/owl/src/render.c \
           lib/owl/src/input.c
+GOON_SRC = lib/goon/goon.c
 
 PROTOCOL_XML = lib/owl/protocols/xdg-shell.xml
 PROTOCOL_H = build/xdg-shell-protocol.h
@@ -49,7 +50,7 @@ SESSION_LOCK_XML = lib/owl/protocols/ext-session-lock-v1.xml
 SESSION_LOCK_H = build/ext-session-lock-v1-protocol.h
 SESSION_LOCK_C = build/ext-session-lock-v1-protocol.c
 
-ALL_SRC = $(DWC_SRC) $(OWL_SRC)
+ALL_SRC = $(DWC_SRC) $(OWL_SRC) $(GOON_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
 TARGET = dwc

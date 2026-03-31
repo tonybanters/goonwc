@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <xkbcommon/xkbcommon.h>
+#include "config.h"
 
 #define DWC_GESTURE_HISTORY_SIZE 32
 #define DWC_GESTURE_HISTORY_MS 150
@@ -85,6 +86,13 @@ struct dwc_floating {
 
 struct dwc_server {
 	owl_display *display;
+
+	/* config */
+	dwc_config config;
+	char *config_path;
+	int inotify_fd;
+	int inotify_wd;
+	struct wl_event_source *config_event_source;
 
 	/* tiled windows (scroll strip) */
 	dwc_toplevel *toplevels;

@@ -1,129 +1,70 @@
 #ifndef DWC_CONFIG_H
 #define DWC_CONFIG_H
 
-#include <xkbcommon/xkbcommon-keysyms.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <xkbcommon/xkbcommon.h>
 #include <owl/owl.h>
 
-/* appearance */
-static const int gap = 5;
+typedef struct dwc_server dwc_server;
 
-/* apps blocked from screen capture (by app_id) */
-static const char *block_screen_capture[] = {
-	"foot",
-	NULL
-};
-static const int border_width = 2;
-static const float border_focused[]   = { 0.57f, 0.63f, 0.80f, 1.0f };  /* #929dcc */
-static const float border_unfocused[] = { 0.30f, 0.30f, 0.30f, 1.0f };  /* #4d4d4d */
+#define DWC_MAX_WINDOW_RULES 64
+#define DWC_MAX_KEYBINDS 128
 
-/* keyboard repeat rate (equivalent to: xset r rate <delay> <rate>) */
-static const int repeat_rate = 35;   /* keys per second */
-static const int repeat_delay = 200; /* ms before repeat starts */
-
-/* tagging */
-#define TAGCOUNT 9
-
-/* commands */
-static const char *termcmd[]  = { "foot", NULL };
-static const char *menucmd[]  = { "rofi", "-show", "drun", NULL };
-
-/* key definitions */
-#define MOD OWL_MOD_ALT
+typedef enum {
+	ACTION_NONE,
+	ACTION_SPAWN,
+	ACTION_SPAWN_TERMINAL,
+	ACTION_KILL,
+	ACTION_QUIT,
+	ACTION_RELOAD_CONFIG,
+	ACTION_FOCUS_NEXT,
+	ACTION_FOCUS_PREV,
+	ACTION_TOGGLE_WIDTH,
+	ACTION_MAXIMIZE,
+	ACTION_TOGGLE_FLOATING,
+	ACTION_VIEW_TAG,
+	ACTION_MOVE_TO_TAG,
+	ACTION_TOGGLE_VIEW_TAG,
+	ACTION_TOGGLE_TAG,
+} dwc_action;
 
 typedef struct {
-	uint32_t mod;
-	uint32_t keysym;
-	void (*func)(void *arg);
-	void *arg;
-} Key;
+	uint32_t mods;
+	xkb_keysym_t key;
+	dwc_action action;
+	union {
+		char *cmd;
+		int32_t i;
+	} arg;
+} dwc_keybind;
 
 typedef struct {
-	const char **cmd;
-} arg_cmd;
+	char *app_id;
+	char *title;
+	bool block_screen_capture;
+} dwc_window_rule;
 
 typedef struct {
-	unsigned int tag;
-} arg_tag;
+	int gap;
+	int border_width;
+	float border_focused[4];
+	float border_unfocused[4];
+	int repeat_rate;
+	int repeat_delay;
 
-typedef struct {
-	int i;
-} arg_int;
+	char *terminal;
+	char *startup_cmd;
 
-/* function declarations for keybindings */
-void spawn(void *arg);
-void killclient(void *arg);
-void quit(void *arg);
-void view(void *arg);
-void tag(void *arg);
-void toggleview(void *arg);
-void toggletag(void *arg);
-void focusstack(void *arg);
-void toggle_width(void *arg);
-void maximize(void *arg);
-void togglefloating(void *arg);
+	dwc_window_rule window_rules[DWC_MAX_WINDOW_RULES];
+	int window_rule_count;
 
-/* tag arguments */
-static arg_tag tag1 = { .tag = 1 << 0 };
-static arg_tag tag2 = { .tag = 1 << 1 };
-static arg_tag tag3 = { .tag = 1 << 2 };
-static arg_tag tag4 = { .tag = 1 << 3 };
-static arg_tag tag5 = { .tag = 1 << 4 };
-static arg_tag tag6 = { .tag = 1 << 5 };
-static arg_tag tag7 = { .tag = 1 << 6 };
-static arg_tag tag8 = { .tag = 1 << 7 };
-static arg_tag tag9 = { .tag = 1 << 8 };
+	dwc_keybind keybinds[DWC_MAX_KEYBINDS];
+	int keybind_count;
+} dwc_config;
 
-/* other arguments */
-static arg_cmd arg_term = { .cmd = termcmd };
-static arg_cmd arg_menu = { .cmd = menucmd };
-static arg_int arg_focusup    = { .i = -1 };
-static arg_int arg_focusdown  = { .i = +1 };
-static arg_int arg_width_prev = { .i = -1 };  /* cycle width preset backwards */
-static arg_int arg_width_next = { .i = +1 };  /* cycle width preset forwards */
-
-static Key keys[] = {
-	/* modifier    key         function        argument */
-	{ MOD,         XKB_KEY_p,  spawn,          &arg_menu },
-	{ MOD,         XKB_KEY_Return, spawn,      &arg_term },
-	{ MOD,         XKB_KEY_q,  killclient,     NULL },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_Q, quit,      NULL },
-
-	{ MOD,         XKB_KEY_h,  focusstack,     &arg_focusup },
-	{ MOD,         XKB_KEY_l,  focusstack,     &arg_focusdown },
-	{ MOD,         XKB_KEY_minus, toggle_width, &arg_width_prev },
-	{ MOD,         XKB_KEY_equal, toggle_width, &arg_width_next },
-	{ MOD,         XKB_KEY_f,  maximize,       NULL },
-	{ MOD,         XKB_KEY_space, togglefloating, NULL },
-
-	{ MOD,         XKB_KEY_1,  view,           &tag1 },
-	{ MOD,         XKB_KEY_2,  view,           &tag2 },
-	{ MOD,         XKB_KEY_3,  view,           &tag3 },
-	{ MOD,         XKB_KEY_4,  view,           &tag4 },
-	{ MOD,         XKB_KEY_5,  view,           &tag5 },
-	{ MOD,         XKB_KEY_6,  view,           &tag6 },
-	{ MOD,         XKB_KEY_7,  view,           &tag7 },
-	{ MOD,         XKB_KEY_8,  view,           &tag8 },
-	{ MOD,         XKB_KEY_9,  view,           &tag9 },
-
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_exclam,      tag, &tag1 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_at,          tag, &tag2 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_numbersign,  tag, &tag3 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_dollar,      tag, &tag4 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_percent,     tag, &tag5 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_asciicircum, tag, &tag6 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_ampersand,   tag, &tag7 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_asterisk,    tag, &tag8 },
-	{ MOD|OWL_MOD_SHIFT, XKB_KEY_parenleft,   tag, &tag9 },
-
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_1, toggleview, &tag1 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_2, toggleview, &tag2 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_3, toggleview, &tag3 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_4, toggleview, &tag4 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_5, toggleview, &tag5 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_6, toggleview, &tag6 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_7, toggleview, &tag7 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_8, toggleview, &tag8 },
-	{ MOD|OWL_MOD_CTRL,  XKB_KEY_9, toggleview, &tag9 },
-};
+bool config_init(dwc_server *server, const char *path);
+void config_cleanup(dwc_server *server);
+bool config_reload(dwc_server *server);
 
 #endif
