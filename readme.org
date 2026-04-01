@@ -1,73 +1,28 @@
 #+AUTHOR: Tony
 #+STARTUP: overview
 
-* DWC — Dynamic Wayland Compositor
+* GoonWC — Goon Wayland Compositor
 
-Currently in early development. Right now it's basically tinywl with a clean module structure, but the vision is to evolve it into a DWM-like tiling compositor with the same philosophy as OXWM.
+Minimal, but functional wayland compositor written in C, and configured in Goon. No Wlroots, just a simple open wayland library implementation.
 
-Uses OWL (Open Wayland Library) instead of wlroots. OWL and DWC are being concurrently developed. OWL's vision can be more understood by reading OWL's source code and readme.
+Uses OWL (Open Wayland Library) instead of wlroots. OWL and GoonWC are being concurrently developed. OWL's vision can be more understood by reading OWL's source code and readme.
 
 * Installation
 ** NixOS (with Flakes)
 DWC includes a =flake.nix= for development. Clone the repo and build with:
 
 #+begin_src sh
-git clone https://github.com/tonybanters/dwc
+git clone https://github.com/tonybanters/goonwc
 cd dwc
 nix develop -c make
 #+end_src
 
-
-* Key Bindings
-Current keybindings are hardcoded (for now):
-
-| Binding       | Action              |
-|---------------+---------------------|
-| Alt+Escape    | Quit compositor     |
-| Alt+F1        | Cycle windows       |
-| Mouse1        | Focus window        |
-| Alt+Mouse1    | Move window         |
-| Alt+Mouse2    | Resize window       |
-
-These will be configurable once we add a configuration system.
-
-* Development
-
-** Setting Up the Development Environment
-Using Nix (recommended):
-#+begin_src sh
-nix develop
-#+end_src
-
-This will drop you into a shell with all dependencies (zig, wlroots, wayland, etc.) available.
-
-** Modular Structure
-DWC uses a *flat but modular* structure inspired by OXWM. Each module is a focused .c file with a clear purpose:
-
-- =server.c= - Lifecycle management
-- =xdg_shell.c= - Window management
-- =input.c= - Input devices
-- =output.c= - Display management
-- =layout.c= - Window arrangement (currently interactive ops, will become tiling)
-
-No header file for every .c file. Use =static= liberally. Only expose what's needed in =dwc.h=.
-
-* Dev Roadmap
-** Current Focus
-- [ ] Tiling layout implementation (master/stack like DWM)
-- [ ] Tag/workspace system
-- [ ] Keybinding configuration
-- [ ] Status bar (similar to OXWM's bar system)
-
-** Future Enhancements
-- [ ] Configuration file (probably not Lua)
-- [ ] Window rules (auto-tag, floating)
-- [ ] Multi-monitor improvements
-- [ ] Gaps support
-- [ ] Scratchpad
-- [ ] External bar protocol support
-
-The goal is to make DWC the Wayland equivalent of OXWM — clean, tiling, tag-based, minimal but powerful.
+* TODO:
+** [ ] - Multiple Monitor Support
+** [ ] - Test and Clean up Bugs
+** [ ] - Documentation
+** [ ] - Package on NixOS
+** [ ] - Package on AUR
 
 * License
 [[https://www.gnu.org/licenses/gpl-3.0.en.html][GPL v3]]
