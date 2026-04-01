@@ -18,11 +18,11 @@ nix develop -c make
 #+end_src
 
 * TODO:
-** [ ] - Multiple Monitor Support
-** [ ] - Test and Clean up Bugs
-** [ ] - Documentation
-** [ ] - Package on NixOS
-** [ ] - Package on AUR
+ 1. [ ] - Multiple Monitor Support
+ 2. [ ] - Test and Clean up Bugs
+ 3. [ ] - Documentation
+ 4. [ ] - Package on NixOS
+ 5. [ ] - Package on AUR
 
 * License
 [[https://www.gnu.org/licenses/gpl-3.0.en.html][GPL v3]]
