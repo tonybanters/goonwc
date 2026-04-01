@@ -9,11 +9,11 @@ Uses OWL (Open Wayland Library) instead of wlroots. OWL and GoonWC are being con
 
 * Installation
 ** NixOS (with Flakes)
-DWC includes a =flake.nix= for development. Clone the repo and build with:
+GoonWC includes a =flake.nix= for development. Clone the repo and build with:
 
 #+begin_src sh
 git clone https://github.com/tonybanters/goonwc
-cd dwc
+cd goonwc
 nix develop -c make
 #+end_src
 
