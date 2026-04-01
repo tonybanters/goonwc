@@ -407,6 +407,7 @@ void owl_seat_send_key(owl_display *display, uint32_t key, uint32_t state);
 void owl_seat_send_modifiers(owl_display *display);
 void owl_seat_send_pointer_motion(owl_display *display, double x, double y);
 void owl_seat_send_pointer_button(owl_display *display, uint32_t button, uint32_t state);
+void owl_seat_send_pointer_axis(owl_display *display, uint32_t axis, double value);
 
 uint32_t owl_render_upload_texture(owl_display *display, owl_surface *surface);
 void owl_render_surface(owl_display *display, owl_surface *surface, int x, int y);
@@ -447,5 +448,7 @@ void owl_dmabuf_buffer_destroy(owl_dmabuf_buffer *buffer);
 
 void owl_session_lock_init(owl_display *display);
 void owl_session_lock_cleanup(owl_display *display);
+
+void owl_vt_switch(int vt);
 
 #endif

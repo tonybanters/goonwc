@@ -151,7 +151,7 @@ static void parse_keybinds(Goon_Value *keys, dwc_config *config) {
 		if (!action_val || !goon_is_string(action_val)) continue;
 
 		const char *key_str = goon_to_string(key_val);
-		xkb_keysym_t keysym = xkb_keysym_from_name(key_str, XKB_KEYSYM_CASE_INSENSITIVE);
+		xkb_keysym_t keysym = xkb_keysym_from_name(key_str, 0);
 		if (keysym == XKB_KEY_NoSymbol) continue;
 
 		enum arg_type arg_type;

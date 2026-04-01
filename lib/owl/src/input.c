@@ -42,6 +42,8 @@ static uint32_t get_time_ms(void) {
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
+void owl_seat_send_pointer_axis(owl_display *display, uint32_t axis, double value);
+
 static int open_restricted(const char *path, int flags, void *user_data) {
     (void)user_data;
     int fd = open(path, flags);
@@ -91,11 +93,27 @@ static void handle_keyboard_key(owl_display *display, struct libinput_event_keyb
     if (display->xkb_state) {
         xkb_state_update_key(
             display->xkb_state,
-            /* todo fix magic number here */
             keycode + 8,
             state == LIBINPUT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP
         );
         update_modifier_state(display);
+    }
+
+    if (state == LIBINPUT_KEY_STATE_PRESSED &&
+        (display->modifier_state & OWL_MOD_CTRL) &&
+        (display->modifier_state & OWL_MOD_ALT)) {
+        if (keycode >= 59 && keycode <= 68) {
+            owl_vt_switch(keycode - 58);
+            return;
+        }
+        if (keycode == 87) {
+            owl_vt_switch(11);
+            return;
+        }
+        if (keycode == 88) {
+            owl_vt_switch(12);
+            return;
+        }
     }
 
     xkb_keysym_t keysym = XKB_KEY_NoSymbol;
@@ -314,6 +332,17 @@ static void handle_gesture_swipe(owl_display *display, struct libinput_event_ges
     owl_invoke_gesture_callback(display, type, &gesture);
 }
 
+static void handle_pointer_axis(owl_display *display, struct libinput_event_pointer *event) {
+    if (libinput_event_pointer_has_axis(event, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
+        double value = libinput_event_pointer_get_axis_value(event, LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+        owl_seat_send_pointer_axis(display, WL_POINTER_AXIS_VERTICAL_SCROLL, value);
+    }
+    if (libinput_event_pointer_has_axis(event, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL)) {
+        double value = libinput_event_pointer_get_axis_value(event, LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+        owl_seat_send_pointer_axis(display, WL_POINTER_AXIS_HORIZONTAL_SCROLL, value);
+    }
+}
+
 static int handle_libinput_event(int fd, uint32_t mask, void *data) {
     (void)fd;
     (void)mask;
@@ -337,6 +366,9 @@ static int handle_libinput_event(int fd, uint32_t mask, void *data) {
                 break;
             case LIBINPUT_EVENT_POINTER_BUTTON:
                 handle_pointer_button(display, libinput_event_get_pointer_event(event));
+                break;
+            case LIBINPUT_EVENT_POINTER_AXIS:
+                handle_pointer_axis(display, libinput_event_get_pointer_event(event));
                 break;
             case LIBINPUT_EVENT_GESTURE_SWIPE_BEGIN:
                 handle_gesture_swipe(display, libinput_event_get_gesture_event(event), OWL_GESTURE_SWIPE_BEGIN);
@@ -852,6 +884,24 @@ void owl_seat_send_pointer_button(owl_display *display, uint32_t button, uint32_
     wl_list_for_each(pointer, &display->pointers, link) {
         if (wl_resource_get_client(pointer->resource) == client) {
             wl_pointer_send_button(pointer->resource, serial, time, button, state);
+            if (wl_resource_get_version(pointer->resource) >= 5)
+                wl_pointer_send_frame(pointer->resource);
+        }
+    }
+}
+
+void owl_seat_send_pointer_axis(owl_display *display, uint32_t axis, double value) {
+    if (!display->pointer_focus) {
+        return;
+    }
+
+    struct wl_client *client = wl_resource_get_client(display->pointer_focus->resource);
+    uint32_t time = get_time_ms();
+
+    owl_pointer *pointer;
+    wl_list_for_each(pointer, &display->pointers, link) {
+        if (wl_resource_get_client(pointer->resource) == client) {
+            wl_pointer_send_axis(pointer->resource, time, axis, wl_fixed_from_double(value));
             if (wl_resource_get_version(pointer->resource) >= 5)
                 wl_pointer_send_frame(pointer->resource);
         }

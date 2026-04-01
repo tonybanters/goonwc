@@ -16,6 +16,10 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/mman.h>
+#include <sys/ioctl.h>
+#include <linux/kd.h>
+#include <linux/vt.h>
+#include <libinput.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <gbm.h>
@@ -62,6 +66,104 @@ static void debug(const char *fmt, ...) {
 		va_end(args);
 		fflush(debug_log);
 	}
+}
+
+/* ==========================================================================
+ * VT management
+ * ========================================================================== */
+
+static int vt_fd = -1;
+static int original_kb_mode = K_UNICODE;
+static struct vt_mode original_vt_mode;
+static owl_display *vt_display = NULL;
+static volatile sig_atomic_t vt_pending_acquire = 0;
+
+static void vt_release(void) {
+	if (!vt_display || vt_fd < 0) return;
+
+	drmDropMaster(vt_display->drm_fd);
+	if (vt_display->libinput) {
+		libinput_suspend(vt_display->libinput);
+	}
+	ioctl(vt_fd, VT_RELDISP, 1);
+}
+
+static void vt_acquire(void) {
+	if (!vt_display || vt_fd < 0) return;
+
+	ioctl(vt_fd, VT_RELDISP, VT_ACKACQ);
+	drmSetMaster(vt_display->drm_fd);
+	if (vt_display->libinput) {
+		libinput_resume(vt_display->libinput);
+	}
+	vt_pending_acquire = 1;
+}
+
+static void vt_signal_handler(int sig) {
+	if (sig == SIGUSR1) {
+		vt_release();
+	} else if (sig == SIGUSR2) {
+		vt_acquire();
+	}
+}
+
+static void vt_check_redraw(owl_display *display) {
+	if (vt_pending_acquire) {
+		vt_pending_acquire = 0;
+		for (int i = 0; i < display->output_count; i++) {
+			if (display->outputs[i]) {
+				owl_render_frame(display, display->outputs[i]);
+			}
+		}
+	}
+}
+
+static void vt_init(owl_display *display) {
+	vt_display = display;
+
+	vt_fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
+	if (vt_fd < 0) return;
+
+	if (ioctl(vt_fd, KDGKBMODE, &original_kb_mode) < 0) {
+		original_kb_mode = K_UNICODE;
+	}
+
+	ioctl(vt_fd, KDSETMODE, KD_GRAPHICS);
+	ioctl(vt_fd, KDSKBMODE, K_OFF);
+	ioctl(vt_fd, VT_GETMODE, &original_vt_mode);
+
+	struct sigaction sa = {
+		.sa_handler = vt_signal_handler,
+		.sa_flags = SA_RESTART,
+	};
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGUSR1, &sa, NULL);
+	sigaction(SIGUSR2, &sa, NULL);
+
+	struct vt_mode mode = {
+		.mode = VT_PROCESS,
+		.relsig = SIGUSR1,
+		.acqsig = SIGUSR2,
+	};
+	ioctl(vt_fd, VT_SETMODE, &mode);
+}
+
+static void vt_cleanup(void) {
+	if (vt_fd < 0) return;
+
+	ioctl(vt_fd, VT_SETMODE, &original_vt_mode);
+	signal(SIGUSR1, SIG_DFL);
+	signal(SIGUSR2, SIG_DFL);
+	ioctl(vt_fd, KDSKBMODE, original_kb_mode);
+	ioctl(vt_fd, KDSETMODE, KD_TEXT);
+	close(vt_fd);
+	vt_fd = -1;
+	vt_display = NULL;
+}
+
+void owl_vt_switch(int vt) {
+	if (vt_fd < 0 || vt < 1 || vt > 12) return;
+	ioctl(vt_fd, VT_ACTIVATE, vt);
 }
 
 /* ==========================================================================
@@ -4176,8 +4278,10 @@ owl_display *owl_display_create(void) {
 	display->event_loop = wl_display_get_event_loop(display->wayland_display);
 
 	signal(SIGPIPE, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
 	wl_event_loop_add_signal(display->event_loop, SIGTERM, handle_signal, display);
+	wl_event_loop_add_signal(display->event_loop, SIGINT, handle_signal, display);
+
+	vt_init(display);
 
 	display->drm_fd = open_drm_device();
 	if (display->drm_fd < 0) {
@@ -4253,6 +4357,8 @@ void owl_display_destroy(owl_display *display) {
 	}
 	if (display->wayland_display) wl_display_destroy(display->wayland_display);
 
+	vt_cleanup();
+
 	free(display);
 }
 
@@ -4268,6 +4374,7 @@ void owl_display_run(owl_display *display) {
 	while (display->running) {
 		wl_display_flush_clients(display->wayland_display);
 		wl_event_loop_dispatch(display->event_loop, -1);
+		vt_check_redraw(display);
 	}
 }
 
