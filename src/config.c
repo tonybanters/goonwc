@@ -17,14 +17,14 @@ static const struct {
 	size_t offset;
 	enum field_type type;
 } config_fields[] = {
-	{"gap",              offsetof(dwc_config, gap),              FIELD_INT},
-	{"border_width",     offsetof(dwc_config, border_width),     FIELD_INT},
-	{"repeat_rate",      offsetof(dwc_config, repeat_rate),      FIELD_INT},
-	{"repeat_delay",     offsetof(dwc_config, repeat_delay),     FIELD_INT},
-	{"border_focused",   offsetof(dwc_config, border_focused),   FIELD_COLOR},
-	{"border_unfocused", offsetof(dwc_config, border_unfocused), FIELD_COLOR},
-	{"terminal",         offsetof(dwc_config, terminal),         FIELD_STRING},
-	{"startup",          offsetof(dwc_config, startup_cmd),      FIELD_STRING},
+	{"gap",              offsetof(goonwc_config, gap),              FIELD_INT},
+	{"border_width",     offsetof(goonwc_config, border_width),     FIELD_INT},
+	{"repeat_rate",      offsetof(goonwc_config, repeat_rate),      FIELD_INT},
+	{"repeat_delay",     offsetof(goonwc_config, repeat_delay),     FIELD_INT},
+	{"border_focused",   offsetof(goonwc_config, border_focused),   FIELD_COLOR},
+	{"border_unfocused", offsetof(goonwc_config, border_unfocused), FIELD_COLOR},
+	{"terminal",         offsetof(goonwc_config, terminal),         FIELD_STRING},
+	{"startup",          offsetof(goonwc_config, startup_cmd),      FIELD_STRING},
 };
 
 static const struct {
@@ -42,7 +42,7 @@ enum arg_type { ARG_NONE, ARG_INT, ARG_STRING };
 
 static const struct {
 	const char *name;
-	dwc_action action;
+	goonwc_action action;
 	enum arg_type arg_type;
 } action_map[] = {
 	{"spawn",            ACTION_SPAWN,            ARG_STRING},
@@ -61,7 +61,7 @@ static const struct {
 	{"toggle-tag",       ACTION_TOGGLE_TAG,       ARG_INT},
 };
 
-static void config_set_defaults(dwc_config *config) {
+static void config_set_defaults(goonwc_config *config) {
 	config->gap = 5;
 	config->border_width = 2;
 	config->border_focused[0] = 0.57f;
@@ -80,7 +80,7 @@ static void config_set_defaults(dwc_config *config) {
 	config->keybind_count = 0;
 }
 
-static void config_free_strings(dwc_config *config) {
+static void config_free_strings(goonwc_config *config) {
 	for (int i = 0; i < config->window_rule_count; i++) {
 		free(config->window_rules[i].app_id);
 		free(config->window_rules[i].title);
@@ -124,7 +124,7 @@ static uint32_t parse_mods(Goon_Value *list) {
 	return mods;
 }
 
-static dwc_action parse_action(const char *name, enum arg_type *arg_type_out) {
+static goonwc_action parse_action(const char *name, enum arg_type *arg_type_out) {
 	for (size_t i = 0; i < sizeof(action_map)/sizeof(action_map[0]); i++) {
 		if (strcmp(name, action_map[i].name) == 0) {
 			*arg_type_out = action_map[i].arg_type;
@@ -135,11 +135,11 @@ static dwc_action parse_action(const char *name, enum arg_type *arg_type_out) {
 	return ACTION_NONE;
 }
 
-static void parse_keybinds(Goon_Value *keys, dwc_config *config) {
+static void parse_keybinds(Goon_Value *keys, goonwc_config *config) {
 	if (!keys || !goon_is_list(keys)) return;
 	size_t len = goon_list_len(keys);
 
-	for (size_t i = 0; i < len && config->keybind_count < DWC_MAX_KEYBINDS; i++) {
+	for (size_t i = 0; i < len && config->keybind_count < GOONWC_MAX_KEYBINDS; i++) {
 		Goon_Value *kb = goon_list_get(keys, i);
 		if (!kb || !goon_is_record(kb)) continue;
 
@@ -155,10 +155,10 @@ static void parse_keybinds(Goon_Value *keys, dwc_config *config) {
 		if (keysym == XKB_KEY_NoSymbol) continue;
 
 		enum arg_type arg_type;
-		dwc_action action = parse_action(goon_to_string(action_val), &arg_type);
+		goonwc_action action = parse_action(goon_to_string(action_val), &arg_type);
 		if (action == ACTION_NONE) continue;
 
-		dwc_keybind *bind = &config->keybinds[config->keybind_count++];
+		goonwc_keybind *bind = &config->keybinds[config->keybind_count++];
 		bind->mods = parse_mods(mod_val);
 		bind->key = keysym;
 		bind->action = action;
@@ -227,18 +227,18 @@ static Goon_Value *builtin_tag_binds(Goon_Ctx *ctx, Goon_Value **args, size_t ar
 	return result;
 }
 
-static void parse_window_rules(Goon_Value *rules, dwc_config *config) {
+static void parse_window_rules(Goon_Value *rules, goonwc_config *config) {
 	if (!rules || !goon_is_list(rules)) return;
 	size_t len = goon_list_len(rules);
 
-	for (size_t i = 0; i < len && config->window_rule_count < DWC_MAX_WINDOW_RULES; i++) {
+	for (size_t i = 0; i < len && config->window_rule_count < GOONWC_MAX_WINDOW_RULES; i++) {
 		Goon_Value *rule = goon_list_get(rules, i);
 		if (!rule || !goon_is_record(rule)) continue;
 
 		Goon_Value *match = goon_record_get(rule, "match");
 		if (!match || !goon_is_record(match)) continue;
 
-		dwc_window_rule *wr = &config->window_rules[config->window_rule_count++];
+		goonwc_window_rule *wr = &config->window_rules[config->window_rule_count++];
 		memset(wr, 0, sizeof(*wr));
 
 		Goon_Value *app_id = goon_record_get(match, "app_id");
@@ -255,21 +255,21 @@ static void parse_window_rules(Goon_Value *rules, dwc_config *config) {
 	}
 }
 
-static bool config_load_goon(dwc_server *server) {
+static bool config_load_goon(goonwc_server *server) {
 	Goon_Ctx *ctx = goon_create();
 	if (!ctx) return false;
 
 	goon_register(ctx, "tag_binds", builtin_tag_binds);
 
 	if (!goon_load_file(ctx, server->config_path)) {
-		fprintf(stderr, "dwc: config error: %s\n", goon_get_error(ctx));
+		fprintf(stderr, "goonwc: config error: %s\n", goon_get_error(ctx));
 		goon_destroy(ctx);
 		return false;
 	}
 
 	Goon_Value *root = goon_eval_result(ctx);
 	if (!root || !goon_is_record(root)) {
-		fprintf(stderr, "dwc: config must evaluate to a record\n");
+		fprintf(stderr, "goonwc: config must evaluate to a record\n");
 		goon_destroy(ctx);
 		return false;
 	}
@@ -299,13 +299,13 @@ static bool config_load_goon(dwc_server *server) {
 	parse_keybinds(goon_record_get(root, "keys"), &server->config);
 
 	goon_destroy(ctx);
-	fprintf(stderr, "dwc: loaded config (gap=%d, border=%d, keybinds=%d)\n",
+	fprintf(stderr, "goonwc: loaded config (gap=%d, border=%d, keybinds=%d)\n",
 		server->config.gap, server->config.border_width, server->config.keybind_count);
 	return true;
 }
 
 static int on_config_change(int fd, uint32_t mask, void *data) {
-	dwc_server *server = data;
+	goonwc_server *server = data;
 
 	char buf[4096];
 	ssize_t len = read(fd, buf, sizeof(buf));
@@ -321,12 +321,12 @@ static int on_config_change(int fd, uint32_t mask, void *data) {
 			server->inotify_wd = inotify_add_watch(server->inotify_fd, server->config_path,
 				IN_MODIFY | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF);
 			if (server->inotify_wd < 0) {
-				fprintf(stderr, "dwc: failed to re-add config watch\n");
+				fprintf(stderr, "goonwc: failed to re-add config watch\n");
 			}
 		}
 
 		if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF)) {
-			fprintf(stderr, "dwc: config file changed, reloading\n");
+			fprintf(stderr, "goonwc: config file changed, reloading\n");
 			config_reload(server);
 		}
 	}
@@ -338,12 +338,12 @@ static char *get_default_config_path(void) {
 	if (!home) return NULL;
 
 	char *path = NULL;
-	if (asprintf(&path, "%s/.config/dwc/config.goon", home) < 0)
+	if (asprintf(&path, "%s/.config/goonwc/config.goon", home) < 0)
 		return NULL;
 	return path;
 }
 
-bool config_init(dwc_server *server, const char *path) {
+bool config_init(goonwc_server *server, const char *path) {
 	config_set_defaults(&server->config);
 	server->inotify_fd = -1;
 	server->inotify_wd = -1;
@@ -356,22 +356,22 @@ bool config_init(dwc_server *server, const char *path) {
 	}
 
 	if (!server->config_path) {
-		fprintf(stderr, "dwc: could not determine config path\n");
+		fprintf(stderr, "goonwc: could not determine config path\n");
 		return false;
 	}
 
 	if (access(server->config_path, R_OK) != 0) {
-		fprintf(stderr, "dwc: config file not found: %s, using defaults\n", server->config_path);
+		fprintf(stderr, "goonwc: config file not found: %s, using defaults\n", server->config_path);
 		return true;
 	}
 
 	if (!config_load_goon(server)) {
-		fprintf(stderr, "dwc: failed to load config, using defaults\n");
+		fprintf(stderr, "goonwc: failed to load config, using defaults\n");
 	}
 
 	server->inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	if (server->inotify_fd < 0) {
-		fprintf(stderr, "dwc: inotify_init failed, hot reload disabled\n");
+		fprintf(stderr, "goonwc: inotify_init failed, hot reload disabled\n");
 		return true;
 	}
 
@@ -381,7 +381,7 @@ bool config_init(dwc_server *server, const char *path) {
         IN_MODIFY | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF
     );
 	if (server->inotify_wd < 0) {
-		fprintf(stderr, "dwc: inotify_add_watch failed\n");
+		fprintf(stderr, "goonwc: inotify_add_watch failed\n");
 		close(server->inotify_fd);
 		server->inotify_fd = -1;
 		return true;
@@ -399,7 +399,7 @@ bool config_init(dwc_server *server, const char *path) {
 	return true;
 }
 
-void config_cleanup(dwc_server *server) {
+void config_cleanup(goonwc_server *server) {
 	if (server->config_event_source) {
 		wl_event_source_remove(server->config_event_source);
 		server->config_event_source = NULL;
@@ -417,7 +417,7 @@ void config_cleanup(dwc_server *server) {
 	server->config_path = NULL;
 }
 
-bool config_reload(dwc_server *server) {
+bool config_reload(goonwc_server *server) {
 	if (!server->config_path) return false;
 	return config_load_goon(server);
 }

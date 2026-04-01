@@ -4,7 +4,7 @@ CFLAGS += -I./include -I./lib/owl/include -I./lib/owl/src -I./lib/goon -I./build
 LDFLAGS = $(shell pkg-config --libs wayland-server xkbcommon libdrm gbm egl glesv2 libinput libudev)
 CFLAGS += $(shell pkg-config --cflags wayland-server xkbcommon libdrm gbm egl glesv2 libinput libudev)
 
-DWC_SRC = src/main.c src/server.c src/config.c
+GOONWC_SRC = src/main.c src/server.c src/config.c
 OWL_SRC = lib/owl/src/owl.c \
           lib/owl/src/render.c \
           lib/owl/src/input.c
@@ -50,10 +50,10 @@ SESSION_LOCK_XML = lib/owl/protocols/ext-session-lock-v1.xml
 SESSION_LOCK_H = build/ext-session-lock-v1-protocol.h
 SESSION_LOCK_C = build/ext-session-lock-v1-protocol.c
 
-ALL_SRC = $(DWC_SRC) $(OWL_SRC) $(GOON_SRC)
+ALL_SRC = $(GOONWC_SRC) $(OWL_SRC) $(GOON_SRC)
 OBJ = $(ALL_SRC:.c=.o)
 
-TARGET = dwc
+TARGET = goonwc
 
 .PHONY: all clean debug
 

@@ -1,4 +1,4 @@
-#include "dwc.h"
+#include "goonwc.h"
 #include <getopt.h>
 #include <stdio.h>
 
@@ -21,7 +21,7 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	dwc_server server = {0};
+	goonwc_server server = {0};
 	if (!server_init(&server)) {
 		return 1;
 	}

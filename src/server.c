@@ -1,4 +1,4 @@
-#include "dwc.h"
+#include "goonwc.h"
 #include "config.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -9,7 +9,7 @@
 #include <math.h>
 #include <wayland-server-core.h>
 
-void arrange_internal(dwc_server *server, bool adjust_scroll);
+void arrange_internal(goonwc_server *server, bool adjust_scroll);
 
 static uint64_t get_time_ms(void) {
 	struct timespec ts;
@@ -21,7 +21,7 @@ static uint64_t get_time_ms(void) {
 #define SPRING_DAMPING_RATIO 1.0
 #define SPRING_EPSILON 0.5
 
-static double spring_calc(dwc_scroll_anim *anim, double t) {
+static double spring_calc(goonwc_scroll_anim *anim, double t) {
 	double stiffness = SPRING_STIFFNESS;
 	double beta = SPRING_DAMPING_RATIO * sqrt(stiffness);
 	double x0 = anim->from - anim->to;
@@ -31,8 +31,8 @@ static double spring_calc(dwc_scroll_anim *anim, double t) {
 
 static int anim_tick(void *data);
 
-static void anim_start(dwc_server *server, double from, double to, double velocity) {
-	server->scroll_anim = (dwc_scroll_anim){
+static void anim_start(goonwc_server *server, double from, double to, double velocity) {
+	server->scroll_anim = (goonwc_scroll_anim){
 		.active = true,
 		.from = from,
 		.to = to,
@@ -46,7 +46,7 @@ static void anim_start(dwc_server *server, double from, double to, double veloci
 	wl_event_source_timer_update(server->anim_timer, 16);
 }
 
-static void anim_stop(dwc_server *server) {
+static void anim_stop(goonwc_server *server) {
 	server->scroll_anim.active = false;
 	if (server->anim_timer) {
 		wl_event_source_timer_update(server->anim_timer, 0);
@@ -54,7 +54,7 @@ static void anim_stop(dwc_server *server) {
 }
 
 static int anim_tick(void *data) {
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	if (!server->scroll_anim.active) return 0;
 
 	double t = (get_time_ms() - server->scroll_anim.start_time_ms) / 1000.0;
@@ -75,7 +75,7 @@ static int anim_tick(void *data) {
 }
 
 /* global server pointer for keybinding functions */
-dwc_server *g_server = NULL;
+goonwc_server *g_server = NULL;
 
 /**
  * is_visible() - returns true if toplevel passed in is visible to user, based
@@ -87,7 +87,7 @@ dwc_server *g_server = NULL;
  *
  * @toplevel: toplevel from compositor
  */
-static bool is_visible(dwc_toplevel *toplevel) {
+static bool is_visible(goonwc_toplevel *toplevel) {
 	return toplevel->tags & toplevel->server->tagset;
 }
 
@@ -96,7 +96,7 @@ static bool is_visible(dwc_toplevel *toplevel) {
  * a tiled window is visible and not fullscreen.
  * @toplevel: toplevel to check
  */
-static bool is_tiled(dwc_toplevel *toplevel) {
+static bool is_tiled(goonwc_toplevel *toplevel) {
 	return is_visible(toplevel) && !toplevel->is_fullscreen;
 }
 
@@ -116,15 +116,15 @@ static bool anchored_to(uint32_t anchor, uint32_t edge) {
  * get_win_width() - niri-style window width calculation
  * @area_w: usable screen width
  * @gap: gap size in pixels
- * @width: dwc_width (proportion or fixed)
+ * @width: goonwc_width (proportion or fixed)
  *
  * for proportion: (area_w - gap) * proportion - gap
  * for fixed: just the fixed value
  *
  * Return: calculated window width in pixels
  */
-static int get_win_width(int area_w, int g, dwc_width width) {
-	if (width.type == DWC_WIDTH_FIXED) {
+static int get_win_width(int area_w, int g, goonwc_width width) {
+	if (width.type == GOONWC_WIDTH_FIXED) {
 		return (int) width.value;
 	}
 	/* proportion: scale to screen */
@@ -141,7 +141,7 @@ static int get_win_width(int area_w, int g, dwc_width width) {
  *
  * Return: rect with usable area for tiling
  */
-static rect get_usable_area(dwc_server *server) {
+static rect get_usable_area(goonwc_server *server) {
 	int output_count = 0;
 	owl_output **outputs = owl_display_get_outputs(server->display, &output_count);
 
@@ -196,9 +196,9 @@ static rect get_usable_area(dwc_server *server) {
  *
  * Return: number of arranged windows on the current tagset
  */
-static int count_tiled(dwc_server *server) {
+static int count_tiled(goonwc_server *server) {
 	int n = 0;
-	dwc_toplevel *t;
+	goonwc_toplevel *t;
 	for (t = server->toplevels; t; t = t->next) {
 		if (is_tiled(t)) {
 			n++;
@@ -212,12 +212,12 @@ static int count_tiled(dwc_server *server) {
  * @server: dwc server
  * @adjust_scroll: if true, scroll to keep focused window visible
  */
-void arrange_internal(dwc_server *server, bool adjust_scroll) {
+void arrange_internal(goonwc_server *server, bool adjust_scroll) {
 	rect area = get_usable_area(server);
 	if (area.w <= 0 || area.h <= 0) return;
 
 	int g = server->config.gap;
-	dwc_toplevel *t;
+	goonwc_toplevel *t;
 
 	/* move invisible windows offscreen */
 	for (t = server->toplevels; t; t = t->next) {
@@ -306,17 +306,17 @@ void arrange_internal(dwc_server *server, bool adjust_scroll) {
 	}
 }
 
-void arrange(dwc_server *server) {
+void arrange(goonwc_server *server) {
 	arrange_internal(server, true);
 }
 
 /* keybinding action functions */
-static void spawn_cmd(dwc_server *server, const char *cmd) {
+static void spawn_cmd(goonwc_server *server, const char *cmd) {
 	if (fork() == 0) {
 		setsid();
 		setenv("WAYLAND_DISPLAY", owl_display_get_socket(server->display), 1);
 		setenv("XDG_SESSION_TYPE", "wayland", 1);
-		setenv("XDG_CURRENT_DESKTOP", "dwc", 1);
+		setenv("XDG_CURRENT_DESKTOP", "goonwc", 1);
 		setenv("TERM", "xterm-256color", 1);
 		setenv("COLORTERM", "truecolor", 1);
 		execl("/bin/sh", "/bin/sh", "-c", cmd, NULL);
@@ -324,18 +324,18 @@ static void spawn_cmd(dwc_server *server, const char *cmd) {
 	}
 }
 
-static void spawn_terminal(dwc_server *server) {
+static void spawn_terminal(goonwc_server *server) {
 	const char *term = server->config.terminal ? server->config.terminal : "foot";
 	spawn_cmd(server, term);
 }
 
-static void killclient(dwc_server *server) {
+static void killclient(goonwc_server *server) {
 	if (server->focused_tiled) {
 		owl_window_close(server->focused_tiled->window);
 	}
 }
 
-static void update_workspace_states(dwc_server *server) {
+static void update_workspace_states(goonwc_server *server) {
 	for (int i = 0; i < 9; i++) {
 		if (server->workspaces[i]) {
 			uint32_t state = (server->tagset & (1 << i)) ? OWL_WORKSPACE_STATE_ACTIVE : 0;
@@ -345,13 +345,13 @@ static void update_workspace_states(dwc_server *server) {
 	owl_workspace_commit(server->display);
 }
 
-static void view_tag(dwc_server *server, int tag_idx) {
+static void view_tag(goonwc_server *server, int tag_idx) {
 	unsigned int tag = 1 << tag_idx;
 	if (tag == server->tagset) return;
 	server->tagset = tag;
 	update_workspace_states(server);
 	arrange(server);
-	for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+	for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 		if (is_visible(t)) {
 			toplevel_focus(t);
 			break;
@@ -359,12 +359,12 @@ static void view_tag(dwc_server *server, int tag_idx) {
 	}
 }
 
-static void move_to_tag(dwc_server *server, int tag_idx) {
+static void move_to_tag(goonwc_server *server, int tag_idx) {
 	if (!server->focused_tiled) return;
 	server->focused_tiled->tags = 1 << tag_idx;
 	arrange(server);
 	if (!is_visible(server->focused_tiled)) {
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+		for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_visible(t)) {
 				toplevel_focus(t);
 				break;
@@ -373,7 +373,7 @@ static void move_to_tag(dwc_server *server, int tag_idx) {
 	}
 }
 
-static void toggle_view_tag(dwc_server *server, int tag_idx) {
+static void toggle_view_tag(goonwc_server *server, int tag_idx) {
 	unsigned int newtagset = server->tagset ^ (1 << tag_idx);
 	if (newtagset) {
 		server->tagset = newtagset;
@@ -381,7 +381,7 @@ static void toggle_view_tag(dwc_server *server, int tag_idx) {
 	}
 }
 
-static void toggle_tag(dwc_server *server, int tag_idx) {
+static void toggle_tag(goonwc_server *server, int tag_idx) {
 	if (!server->focused_tiled) return;
 	unsigned int newtags = server->focused_tiled->tags ^ (1 << tag_idx);
 	if (newtags) {
@@ -390,14 +390,14 @@ static void toggle_tag(dwc_server *server, int tag_idx) {
 	}
 }
 
-static void focus_next(dwc_server *server) {
+static void focus_next(goonwc_server *server) {
 	if (!server->focused_tiled) return;
-	dwc_toplevel *target = NULL;
-	for (dwc_toplevel *t = server->focused_tiled->next; t; t = t->next) {
+	goonwc_toplevel *target = NULL;
+	for (goonwc_toplevel *t = server->focused_tiled->next; t; t = t->next) {
 		if (is_visible(t)) { target = t; break; }
 	}
 	if (!target) {
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+		for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_visible(t)) { target = t; break; }
 		}
 	}
@@ -407,14 +407,14 @@ static void focus_next(dwc_server *server) {
 	}
 }
 
-static void focus_prev(dwc_server *server) {
+static void focus_prev(goonwc_server *server) {
 	if (!server->focused_tiled) return;
-	dwc_toplevel *target = NULL;
-	for (dwc_toplevel *t = server->focused_tiled->prev; t; t = t->prev) {
+	goonwc_toplevel *target = NULL;
+	for (goonwc_toplevel *t = server->focused_tiled->prev; t; t = t->prev) {
 		if (is_visible(t)) { target = t; break; }
 	}
 	if (!target) {
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+		for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_visible(t)) target = t;
 		}
 	}
@@ -424,44 +424,44 @@ static void focus_prev(dwc_server *server) {
 	}
 }
 
-static void toggle_width(dwc_server *server, int dir) {
+static void toggle_width(goonwc_server *server, int dir) {
 	if (!server->focused_tiled) return;
-	dwc_toplevel *t = server->focused_tiled;
+	goonwc_toplevel *t = server->focused_tiled;
 
 	t->preset_index += dir;
-	if (t->preset_index >= DWC_PRESET_COUNT) t->preset_index = 0;
-	if (t->preset_index < 0) t->preset_index = DWC_PRESET_COUNT - 1;
+	if (t->preset_index >= GOONWC_PRESET_COUNT) t->preset_index = 0;
+	if (t->preset_index < 0) t->preset_index = GOONWC_PRESET_COUNT - 1;
 
-	t->width.type = DWC_WIDTH_PROPORTION;
-	t->width.value = dwc_width_presets[t->preset_index];
+	t->width.type = GOONWC_WIDTH_PROPORTION;
+	t->width.value = goonwc_width_presets[t->preset_index];
 	arrange(server);
 }
 
-static void maximize(dwc_server *server) {
+static void maximize(goonwc_server *server) {
 	if (!server->focused_tiled) return;
-	dwc_toplevel *t = server->focused_tiled;
+	goonwc_toplevel *t = server->focused_tiled;
 
-	if (t->width.type == DWC_WIDTH_PROPORTION && t->width.value >= 0.99f) {
+	if (t->width.type == GOONWC_WIDTH_PROPORTION && t->width.value >= 0.99f) {
 		t->preset_index = 1;
-		t->width.value = dwc_width_presets[1];
+		t->width.value = goonwc_width_presets[1];
 	} else {
 		t->preset_index = -1;
-		t->width.type = DWC_WIDTH_PROPORTION;
+		t->width.type = GOONWC_WIDTH_PROPORTION;
 		t->width.value = 1.0f;
 	}
 	arrange(server);
 }
 
-static void togglefloating(dwc_server *server) {
+static void togglefloating(goonwc_server *server) {
 	(void)server;
 }
 
 
 /* callbacks */
-static bool should_block_capture(dwc_server *server, const char *app_id) {
+static bool should_block_capture(goonwc_server *server, const char *app_id) {
 	if (!app_id) return false;
 	for (int i = 0; i < server->config.window_rule_count; i++) {
-		dwc_window_rule *rule = &server->config.window_rules[i];
+		goonwc_window_rule *rule = &server->config.window_rules[i];
 		if (rule->block_screen_capture && rule->app_id && strcmp(app_id, rule->app_id) == 0)
 			return true;
 	}
@@ -470,8 +470,8 @@ static bool should_block_capture(dwc_server *server, const char *app_id) {
 
 static void on_window_create(owl_display *display, owl_window *window, void *data) {
 	(void)display;
-	dwc_server *server = data;
-	dwc_toplevel *toplevel = toplevel_create(server, window);
+	goonwc_server *server = data;
+	goonwc_toplevel *toplevel = toplevel_create(server, window);
 	if (toplevel) {
 		window->user_data = toplevel;
 		toplevel_focus(toplevel);
@@ -481,7 +481,7 @@ static void on_window_create(owl_display *display, owl_window *window, void *dat
 
 static void on_window_map(owl_display *display, owl_window *window, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	if (should_block_capture(server, window->app_id)) {
 		owl_window_set_block_out_from(window, OWL_BLOCK_OUT_SCREEN_CAPTURE);
 	}
@@ -489,8 +489,8 @@ static void on_window_map(owl_display *display, owl_window *window, void *data) 
 
 static void on_window_destroy(owl_display *display, owl_window *window, void *data) {
 	(void)display;
-	dwc_server *server = data;
-	dwc_toplevel *toplevel = window->user_data;
+	goonwc_server *server = data;
+	goonwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
 		toplevel_destroy(toplevel);
 		arrange_internal(server, false);
@@ -500,7 +500,7 @@ static void on_window_destroy(owl_display *display, owl_window *window, void *da
 static void on_window_request_move(owl_display *display, owl_window *window, void *data) {
 	(void)display;
 	(void)data;
-	dwc_toplevel *toplevel = window->user_data;
+	goonwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
 		/* TODO: convert to floating and move */
 		/* for now, tiled windows can't be moved via drag */
@@ -510,7 +510,7 @@ static void on_window_request_move(owl_display *display, owl_window *window, voi
 static void on_window_request_resize(owl_display *display, owl_window *window, void *data) {
 	(void)display;
 	(void)data;
-	dwc_toplevel *toplevel = window->user_data;
+	goonwc_toplevel *toplevel = window->user_data;
 	if (toplevel) {
 		/* TODO: convert to floating and resize, or resize tiled width */
 		/* for now, tiled windows resize via keyboard only */
@@ -519,7 +519,7 @@ static void on_window_request_resize(owl_display *display, owl_window *window, v
 
 static bool on_key_press(owl_display *display, owl_input *input, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	uint32_t keysym = input->keysym;
 	uint32_t modifiers = input->modifiers;
 	return handle_keybinding(server, keysym, modifiers);
@@ -527,14 +527,14 @@ static bool on_key_press(owl_display *display, owl_input *input, void *data) {
 
 static bool on_pointer_motion(owl_display *display, owl_input *input, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	int x = input->pointer_x;
 	int y = input->pointer_y;
 
-	if (server->cursor_mode == DWC_CURSOR_MOVE) {
+	if (server->cursor_mode == GOONWC_CURSOR_MOVE) {
 		process_cursor_move(server, x, y);
 		return true;
-	} else if (server->cursor_mode == DWC_CURSOR_RESIZE) {
+	} else if (server->cursor_mode == GOONWC_CURSOR_RESIZE) {
 		process_cursor_resize(server, x, y);
 		return true;
 	}
@@ -543,11 +543,11 @@ static bool on_pointer_motion(owl_display *display, owl_input *input, void *data
 
 static bool on_button_press(owl_display *display, owl_input *input, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	int x = input->pointer_x;
 	int y = input->pointer_y;
 
-	dwc_toplevel *toplevel = toplevel_at(server, x, y);
+	goonwc_toplevel *toplevel = toplevel_at(server, x, y);
 	if (toplevel) {
 		toplevel_focus(toplevel);
 	}
@@ -557,14 +557,14 @@ static bool on_button_press(owl_display *display, owl_input *input, void *data) 
 static bool on_button_release(owl_display *display, owl_input *input, void *data) {
 	(void)display;
 	(void)input;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	reset_cursor_mode(server);
 	return false; /* don't consume button events */
 }
 
 static void on_workspace_activate(owl_display *display, owl_workspace *workspace, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	const char *name = workspace->name;
 	if (name && name[0] >= '1' && name[0] <= '9') {
 		int tag_index = name[0] - '1';
@@ -581,14 +581,14 @@ static void on_workspace_deactivate(owl_display *display, owl_workspace *workspa
 static void on_layer_surface_map(owl_display *display, owl_layer_surface *surface, void *data) {
 	(void)display;
 	(void)surface;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	arrange(server);
 }
 
 static void on_layer_surface_unmap(owl_display *display, owl_layer_surface *surface, void *data) {
 	(void)display;
 	(void)surface;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 	arrange(server);
 
 	if (server->focused_tiled) {
@@ -598,8 +598,8 @@ static void on_layer_surface_unmap(owl_display *display, owl_layer_surface *surf
 
 static void on_render_window(owl_display *display, owl_window *window, void *data) {
 	(void)display;
-	dwc_server *server = data;
-	dwc_toplevel *toplevel = window->user_data;
+	goonwc_server *server = data;
+	goonwc_toplevel *toplevel = window->user_data;
 
 	if (!toplevel) return;
 
@@ -623,7 +623,7 @@ static void on_render_window(owl_display *display, owl_window *window, void *dat
 
 static void on_gesture_begin(owl_display *display, owl_gesture *gesture, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 
 	if (gesture->fingers == 3) {
 		server->gesture_active = true;
@@ -636,14 +636,14 @@ static void on_gesture_begin(owl_display *display, owl_gesture *gesture, void *d
 
 static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 
 	if (gesture->fingers == 3) {
 		rect area = get_usable_area(server);
 		int g = server->config.gap;
 
 		int total_width = g;
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+		for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (is_tiled(t)) {
 				total_width += get_win_width(area.w, g, t->width) + g;
 			}
@@ -654,15 +654,15 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 
 		uint64_t now = get_time_ms();
 
-		if (server->gesture_history_len < DWC_GESTURE_HISTORY_SIZE) {
-			server->gesture_history[server->gesture_history_len++] = (dwc_gesture_event){
+		if (server->gesture_history_len < GOONWC_GESTURE_HISTORY_SIZE) {
+			server->gesture_history[server->gesture_history_len++] = (goonwc_gesture_event){
 				.dx = gesture->dx * 2.0,
 				.timestamp_ms = now,
 			};
 		} else {
 			memmove(&server->gesture_history[0], &server->gesture_history[1],
-			        (DWC_GESTURE_HISTORY_SIZE - 1) * sizeof(dwc_gesture_event));
-			server->gesture_history[DWC_GESTURE_HISTORY_SIZE - 1] = (dwc_gesture_event){
+			        (GOONWC_GESTURE_HISTORY_SIZE - 1) * sizeof(goonwc_gesture_event));
+			server->gesture_history[GOONWC_GESTURE_HISTORY_SIZE - 1] = (goonwc_gesture_event){
 				.dx = gesture->dx * 2.0,
 				.timestamp_ms = now,
 			};
@@ -677,11 +677,11 @@ static void on_gesture_update(owl_display *display, owl_gesture *gesture, void *
 	}
 }
 
-static double calculate_gesture_velocity(dwc_server *server) {
+static double calculate_gesture_velocity(goonwc_server *server) {
 	if (server->gesture_history_len < 2) return 0.0;
 
 	uint64_t now = get_time_ms();
-	uint64_t cutoff = now - DWC_GESTURE_HISTORY_MS;
+	uint64_t cutoff = now - GOONWC_GESTURE_HISTORY_MS;
 
 	double total_delta = 0.0;
 	uint64_t first_time = 0;
@@ -689,7 +689,7 @@ static double calculate_gesture_velocity(dwc_server *server) {
 	bool found_first = false;
 
 	for (int i = 0; i < server->gesture_history_len; i++) {
-		dwc_gesture_event *ev = &server->gesture_history[i];
+		goonwc_gesture_event *ev = &server->gesture_history[i];
 		if (ev->timestamp_ms >= cutoff) {
 			total_delta += ev->dx;
 			if (!found_first) {
@@ -710,7 +710,7 @@ static double calculate_gesture_velocity(dwc_server *server) {
 
 static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *data) {
 	(void)display;
-	dwc_server *server = data;
+	goonwc_server *server = data;
 
 	if (gesture->fingers == 3) {
 		server->gesture_active = false;
@@ -722,12 +722,12 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 		double decel = 1000.0 * log(DECELERATION_TOUCHPAD);
 		double projected_offset = server->scroll_offset - (velocity / decel);
 
-		dwc_toplevel *best = NULL;
+		goonwc_toplevel *best = NULL;
 		double best_snap = 0;
 		double best_dist = 1e9;
 		int pos = g;
 
-		for (dwc_toplevel *t = server->toplevels; t; t = t->next) {
+		for (goonwc_toplevel *t = server->toplevels; t; t = t->next) {
 			if (!is_tiled(t)) continue;
 
 			int w = get_win_width(area.w, g, t->width);
@@ -757,12 +757,12 @@ static void on_gesture_end(owl_display *display, owl_gesture *gesture, void *dat
 	}
 }
 
-bool server_init(dwc_server *server) {
-	memset(server, 0, sizeof(dwc_server));
+bool server_init(goonwc_server *server) {
+	memset(server, 0, sizeof(goonwc_server));
 
 	server->display = owl_display_create();
 	if (!server->display) {
-		fprintf(stderr, "dwc: failed to create owl display\n");
+		fprintf(stderr, "goonwc: failed to create owl display\n");
 		return false;
 	}
 
@@ -793,7 +793,7 @@ bool server_init(dwc_server *server) {
 
 	owl_set_render_callback(server->display, on_render_window, server);
 
-	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
+	server->cursor_mode = GOONWC_CURSOR_PASSTHROUGH;
 	server->tagset = 1; /* start on tag 1 */
 
 	/* create 9 workspaces (1-9) */
@@ -812,12 +812,12 @@ bool server_init(dwc_server *server) {
 	return true;
 }
 
-void server_run(dwc_server *server, const char *startup_cmd) {
+void server_run(goonwc_server *server, const char *startup_cmd) {
 	if (startup_cmd) {
 		if (fork() == 0) {
 			setenv("WAYLAND_DISPLAY", owl_display_get_socket(server->display), 1);
 			setenv("XDG_SESSION_TYPE", "wayland", 1);
-			setenv("XDG_CURRENT_DESKTOP", "dwc", 1);
+			setenv("XDG_CURRENT_DESKTOP", "goonwc", 1);
 			setenv("TERM", "xterm-256color", 1);
 			setenv("COLORTERM", "truecolor", 1);
 			execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (void *)NULL);
@@ -825,21 +825,21 @@ void server_run(dwc_server *server, const char *startup_cmd) {
 		}
 	}
 
-	fprintf(stderr, "dwc: running on %s\n", owl_display_get_socket(server->display));
+	fprintf(stderr, "goonwc: running on %s\n", owl_display_get_socket(server->display));
 	owl_display_run(server->display);
 }
 
-void server_cleanup(dwc_server *server) {
+void server_cleanup(goonwc_server *server) {
 	config_cleanup(server);
 	owl_display_destroy(server->display);
 }
 
-static int focus_stack_remove(dwc_server *server, dwc_toplevel *toplevel) {
+static int focus_stack_remove(goonwc_server *server, goonwc_toplevel *toplevel) {
 	for (int i = 0; i < server->focus_stack_len; i++) {
 		if (server->focus_stack[i].toplevel == toplevel) {
 			int saved_scroll = server->focus_stack[i].scroll_offset;
 			memmove(&server->focus_stack[i], &server->focus_stack[i + 1],
-			        (server->focus_stack_len - i - 1) * sizeof(dwc_focus_entry));
+			        (server->focus_stack_len - i - 1) * sizeof(goonwc_focus_entry));
 			server->focus_stack_len--;
 			return saved_scroll;
 		}
@@ -847,24 +847,24 @@ static int focus_stack_remove(dwc_server *server, dwc_toplevel *toplevel) {
 	return server->scroll_offset;
 }
 
-static void focus_stack_push(dwc_server *server, dwc_toplevel *toplevel) {
+static void focus_stack_push(goonwc_server *server, goonwc_toplevel *toplevel) {
 	focus_stack_remove(server, toplevel);
 
-	if (server->focus_stack_len >= DWC_FOCUS_STACK_SIZE) {
+	if (server->focus_stack_len >= GOONWC_FOCUS_STACK_SIZE) {
 		memmove(&server->focus_stack[0], &server->focus_stack[1],
-		        (DWC_FOCUS_STACK_SIZE - 1) * sizeof(dwc_focus_entry));
-		server->focus_stack_len = DWC_FOCUS_STACK_SIZE - 1;
+		        (GOONWC_FOCUS_STACK_SIZE - 1) * sizeof(goonwc_focus_entry));
+		server->focus_stack_len = GOONWC_FOCUS_STACK_SIZE - 1;
 	}
 
-	server->focus_stack[server->focus_stack_len++] = (dwc_focus_entry){
+	server->focus_stack[server->focus_stack_len++] = (goonwc_focus_entry){
 		.toplevel = toplevel,
 		.scroll_offset = server->scroll_offset,
 	};
 }
 
-static dwc_focus_entry *focus_stack_get_previous(dwc_server *server) {
+static goonwc_focus_entry *focus_stack_get_previous(goonwc_server *server) {
 	for (int i = server->focus_stack_len - 1; i >= 0; i--) {
-		dwc_focus_entry *entry = &server->focus_stack[i];
+		goonwc_focus_entry *entry = &server->focus_stack[i];
 		if (entry->toplevel && is_visible(entry->toplevel)) {
 			return entry;
 		}
@@ -872,8 +872,8 @@ static dwc_focus_entry *focus_stack_get_previous(dwc_server *server) {
 	return NULL;
 }
 
-dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
-	dwc_toplevel *toplevel = calloc(1, sizeof(dwc_toplevel));
+goonwc_toplevel *toplevel_create(goonwc_server *server, owl_window *window) {
+	goonwc_toplevel *toplevel = calloc(1, sizeof(goonwc_toplevel));
 	if (!toplevel) {
 		return NULL;
 	}
@@ -883,8 +883,8 @@ dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
 	toplevel->tags = server->tagset; /* new windows get current tag */
 	toplevel->is_fullscreen = false;
 	toplevel->preset_index = 1; /* start at 1/2 width */
-	toplevel->width.type = DWC_WIDTH_PROPORTION;
-	toplevel->width.value = dwc_width_presets[1]; /* 0.5 */
+	toplevel->width.type = GOONWC_WIDTH_PROPORTION;
+	toplevel->width.value = goonwc_width_presets[1]; /* 0.5 */
 
 	/* insert after focused window (to the right in scroll layout) */
 	if (server->focused_tiled) {
@@ -907,18 +907,18 @@ dwc_toplevel *toplevel_create(dwc_server *server, owl_window *window) {
 	return toplevel;
 }
 
-void toplevel_destroy(dwc_toplevel *toplevel) {
+void toplevel_destroy(goonwc_toplevel *toplevel) {
 	if (!toplevel) {
 		return;
 	}
 
-	dwc_server *server = toplevel->server;
+	goonwc_server *server = toplevel->server;
 
 	int saved_scroll = focus_stack_remove(server, toplevel);
 
 	if (server->focused_tiled == toplevel) {
 		server->focused_tiled = NULL;
-		dwc_focus_entry *entry = focus_stack_get_previous(server);
+		goonwc_focus_entry *entry = focus_stack_get_previous(server);
 		if (entry) {
 			server->focused_tiled = entry->toplevel;
 			server->scroll_offset = saved_scroll;
@@ -942,12 +942,12 @@ void toplevel_destroy(dwc_toplevel *toplevel) {
 	free(toplevel);
 }
 
-void toplevel_focus(dwc_toplevel *toplevel) {
+void toplevel_focus(goonwc_toplevel *toplevel) {
 	if (!toplevel) {
 		return;
 	}
 
-	dwc_server *server = toplevel->server;
+	goonwc_server *server = toplevel->server;
 
 	if (server->focused_tiled == toplevel) {
 		return;
@@ -958,8 +958,8 @@ void toplevel_focus(dwc_toplevel *toplevel) {
 	owl_window_focus(toplevel->window);
 }
 
-dwc_toplevel *toplevel_at(dwc_server *server, int x, int y) {
-	dwc_toplevel *toplevel;
+goonwc_toplevel *toplevel_at(goonwc_server *server, int x, int y) {
+	goonwc_toplevel *toplevel;
 	for (toplevel = server->toplevels; toplevel; toplevel = toplevel->next) {
 		if (!is_visible(toplevel)) continue;
 
@@ -975,12 +975,12 @@ dwc_toplevel *toplevel_at(dwc_server *server, int x, int y) {
 	return NULL;
 }
 
-bool handle_keybinding(dwc_server *server, uint32_t keysym, uint32_t modifiers) {
+bool handle_keybinding(goonwc_server *server, uint32_t keysym, uint32_t modifiers) {
 	uint32_t relevant_mods = OWL_MOD_SHIFT | OWL_MOD_CTRL | OWL_MOD_ALT | OWL_MOD_SUPER;
 	uint32_t cleaned_mods = modifiers & relevant_mods;
 
 	for (int i = 0; i < server->config.keybind_count; i++) {
-		dwc_keybind *kb = &server->config.keybinds[i];
+		goonwc_keybind *kb = &server->config.keybinds[i];
 		if (kb->key == keysym && kb->mods == cleaned_mods) {
 			switch (kb->action) {
 			case ACTION_SPAWN:
@@ -1035,8 +1035,8 @@ bool handle_keybinding(dwc_server *server, uint32_t keysym, uint32_t modifiers) 
 	return false;
 }
 
-void begin_interactive(dwc_toplevel *toplevel, dwc_cursor_mode mode, uint32_t edges) {
-	dwc_server *server = toplevel->server;
+void begin_interactive(goonwc_toplevel *toplevel, goonwc_cursor_mode mode, uint32_t edges) {
+	goonwc_server *server = toplevel->server;
 
 	server->grabbed_tiled = toplevel;
 	server->cursor_mode = mode;
@@ -1052,13 +1052,13 @@ void begin_interactive(dwc_toplevel *toplevel, dwc_cursor_mode mode, uint32_t ed
 	server->grab_height = toplevel->window->height;
 }
 
-void reset_cursor_mode(dwc_server *server) {
-	server->cursor_mode = DWC_CURSOR_PASSTHROUGH;
+void reset_cursor_mode(goonwc_server *server) {
+	server->cursor_mode = GOONWC_CURSOR_PASSTHROUGH;
 	server->grabbed_tiled = NULL;
 }
 
-void process_cursor_move(dwc_server *server, int x, int y) {
-	dwc_toplevel *toplevel = server->grabbed_tiled;
+void process_cursor_move(goonwc_server *server, int x, int y) {
+	goonwc_toplevel *toplevel = server->grabbed_tiled;
 	if (!toplevel) {
 		return;
 	}
@@ -1069,8 +1069,8 @@ void process_cursor_move(dwc_server *server, int x, int y) {
 	owl_window_move(toplevel->window, new_x, new_y);
 }
 
-void process_cursor_resize(dwc_server *server, int x, int y) {
-	dwc_toplevel *toplevel = server->grabbed_tiled;
+void process_cursor_resize(goonwc_server *server, int x, int y) {
+	goonwc_toplevel *toplevel = server->grabbed_tiled;
 	if (!toplevel) {
 		return;
 	}

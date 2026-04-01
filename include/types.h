@@ -1,5 +1,5 @@
-#ifndef DWC_TYPES_H
-#define DWC_TYPES_H
+#ifndef GOONWC_TYPES_H
+#define GOONWC_TYPES_H
 
 #include <owl/owl.h>
 #include <stdbool.h>
@@ -7,49 +7,47 @@
 #include <xkbcommon/xkbcommon.h>
 #include "config.h"
 
-#define DWC_GESTURE_HISTORY_SIZE 32
-#define DWC_GESTURE_HISTORY_MS 150
+#define GOONWC_GESTURE_HISTORY_SIZE 32
+#define GOONWC_GESTURE_HISTORY_MS 150
 
 typedef struct {
 	double dx;
 	uint64_t timestamp_ms;
-} dwc_gesture_event;
+} goonwc_gesture_event;
 
 typedef enum {
-	DWC_CURSOR_PASSTHROUGH,
-	DWC_CURSOR_MOVE,
-	DWC_CURSOR_RESIZE,
-} dwc_cursor_mode;
+	GOONWC_CURSOR_PASSTHROUGH,
+	GOONWC_CURSOR_MOVE,
+	GOONWC_CURSOR_RESIZE,
+} goonwc_cursor_mode;
 
 typedef struct {
 	int x, y, w, h;
 } rect;
 
-typedef struct dwc_toplevel dwc_toplevel;
-typedef struct dwc_floating dwc_floating;
-typedef struct dwc_server dwc_server;
+typedef struct goonwc_toplevel goonwc_toplevel;
+typedef struct goonwc_floating goonwc_floating;
+typedef struct goonwc_server goonwc_server;
 
-/* niri-style column width */
 typedef enum {
-	DWC_WIDTH_PROPORTION,   /* fraction of screen (scales with monitor) */
-	DWC_WIDTH_FIXED,        /* exact pixels (stays constant) */
-} dwc_width_type;
+	GOONWC_WIDTH_PROPORTION,
+	GOONWC_WIDTH_FIXED,
+} goonwc_width_type;
 
 typedef struct {
-	dwc_width_type type;
-	float value;            /* proportion (0.0-1.0) or pixels */
-} dwc_width;
+	goonwc_width_type type;
+	float value;
+} goonwc_width;
 
-/* default presets: 1/3, 1/2, 2/3 */
-#define DWC_PRESET_COUNT 3
-static const float dwc_width_presets[DWC_PRESET_COUNT] = { 1.0f/3.0f, 0.5f, 2.0f/3.0f };
+#define GOONWC_PRESET_COUNT 3
+static const float goonwc_width_presets[GOONWC_PRESET_COUNT] = { 1.0f/3.0f, 0.5f, 2.0f/3.0f };
 
-#define DWC_FOCUS_STACK_SIZE 64
+#define GOONWC_FOCUS_STACK_SIZE 64
 
 typedef struct {
-	dwc_toplevel *toplevel;
+	goonwc_toplevel *toplevel;
 	int scroll_offset;
-} dwc_focus_entry;
+} goonwc_focus_entry;
 
 typedef struct {
 	bool active;
@@ -57,79 +55,73 @@ typedef struct {
 	double to;
 	double velocity;
 	uint64_t start_time_ms;
-} dwc_scroll_anim;
+} goonwc_scroll_anim;
 
-/* tiled window in scroll strip */
-struct dwc_toplevel {
-	dwc_server *server;
+struct goonwc_toplevel {
+	goonwc_server *server;
 	owl_window *window;
 	unsigned int tags;
 	bool is_fullscreen;
-	dwc_width width;        /* niri-style width */
-	int preset_index;       /* which preset we're on (-1 if custom) */
-	dwc_toplevel *next;
-	dwc_toplevel *prev;
+	goonwc_width width;
+	int preset_index;
+	goonwc_toplevel *next;
+	goonwc_toplevel *prev;
 };
 
-/* floating window (separate from scroll strip) */
-struct dwc_floating {
-	dwc_server *server;
+struct goonwc_floating {
+	goonwc_server *server;
 	owl_window *window;
-	float pos_x;            /* 0.0-1.0 fraction of working area */
-	float pos_y;            /* 0.0-1.0 fraction of working area */
+	float pos_x;
+	float pos_y;
 	int width;
 	int height;
 	unsigned int tags;
-	dwc_floating *next;
-	dwc_floating *prev;
+	goonwc_floating *next;
+	goonwc_floating *prev;
 };
 
-struct dwc_server {
+struct goonwc_server {
 	owl_display *display;
 
-	/* config */
-	dwc_config config;
+	goonwc_config config;
 	char *config_path;
 	int inotify_fd;
 	int inotify_wd;
 	struct wl_event_source *config_event_source;
 
-	/* tiled windows (scroll strip) */
-	dwc_toplevel *toplevels;
-	dwc_toplevel *focused_tiled;
+	goonwc_toplevel *toplevels;
+	goonwc_toplevel *focused_tiled;
 	int toplevel_count;
 
-	/* floating windows (overlay) */
-	dwc_floating *floating;
-	dwc_floating *focused_floating;
+	goonwc_floating *floating;
+	goonwc_floating *focused_floating;
 	int floating_count;
 
-	/* which space has focus */
 	bool floating_is_active;
 
 	unsigned int tagset;
 	int scroll_offset;
 	bool gesture_active;
 	int gesture_start_offset;
-	dwc_toplevel *gesture_start_focused;
+	goonwc_toplevel *gesture_start_focused;
 	double gesture_cumulative_dx;
-	dwc_gesture_event gesture_history[DWC_GESTURE_HISTORY_SIZE];
+	goonwc_gesture_event gesture_history[GOONWC_GESTURE_HISTORY_SIZE];
 	int gesture_history_len;
 
-	dwc_scroll_anim scroll_anim;
+	goonwc_scroll_anim scroll_anim;
 	struct wl_event_source *anim_timer;
 
 	owl_workspace *workspaces[9];
 
-	dwc_cursor_mode cursor_mode;
-	dwc_toplevel *grabbed_tiled;
-	dwc_floating *grabbed_floating;
+	goonwc_cursor_mode cursor_mode;
+	goonwc_toplevel *grabbed_tiled;
+	goonwc_floating *grabbed_floating;
 	double grab_x, grab_y;
 	int grab_width, grab_height;
 	int grab_pos_x, grab_pos_y;
 	uint32_t resize_edges;
 
-	dwc_focus_entry focus_stack[DWC_FOCUS_STACK_SIZE];
+	goonwc_focus_entry focus_stack[GOONWC_FOCUS_STACK_SIZE];
 	int focus_stack_len;
 };
 

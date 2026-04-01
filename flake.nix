@@ -1,5 +1,5 @@
 {
-  description = "DWC - A dynamic Wayland compositor";
+  description = "GoonWC - A dynamic Wayland compositor";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -34,18 +34,18 @@
         ];
 
         shellHook = ''
-          echo "DWC development environment"
+          echo "GoonWC development environment"
           echo ""
           echo "  make                - build"
           echo "  bear -- make        - build + compile_commands.json"
-          echo "  ./dwc               - run (from TTY)"
+          echo "  ./goonwc            - run (from TTY)"
         '';
       };
     });
 
     packages = forAllSystems (pkgs: {
       default = pkgs.stdenv.mkDerivation {
-        pname = "dwc";
+        pname = "goonwc";
         version = "0.1.0";
         src = ./.;
 
@@ -71,7 +71,7 @@
 
         installPhase = ''
           mkdir -p $out/bin
-          cp dwc $out/bin/
+          cp goonwc $out/bin/
         '';
 
         meta = with pkgs.lib; {

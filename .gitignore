@@ -6,7 +6,7 @@ zig-out/
 result
 protocols/
 build/
-dwc
+goonwc
 *.o
 
 testing-folder/
