@@ -4,8 +4,8 @@ zig-out/
 .cache/
 .zig-cache/
 result
-protocols/
-build/
+/protocols/
+/build/
 goonwc
 *.o
 
