@@ -24,6 +24,7 @@ typedef enum {
     TOK_DOT,
     TOK_ARROW,
     TOK_INT,
+    TOK_FLOAT,
     TOK_STRING,
     TOK_IDENT,
     TOK_TRUE,
@@ -39,6 +40,7 @@ typedef struct {
     Token_Type type;
     union {
         int64_t integer;
+        double floating;
         char *string;
     } data;
 } Token;
@@ -283,13 +285,27 @@ static bool lexer_next(Lexer *lex) {
             sign = -1;
             lexer_advance(lex);
         }
-        int64_t val = 0;
+        int64_t int_val = 0;
         while (lex->pos < lex->len && isdigit(lex->src[lex->pos])) {
-            val = val * 10 + (lex->src[lex->pos] - '0');
+            int_val = int_val * 10 + (lex->src[lex->pos] - '0');
             lexer_advance(lex);
         }
+        if (lex->pos < lex->len && lex->src[lex->pos] == '.' &&
+            lex->pos + 1 < lex->len && isdigit(lex->src[lex->pos + 1])) {
+            lexer_advance(lex);
+            double frac = 0.0;
+            double divisor = 10.0;
+            while (lex->pos < lex->len && isdigit(lex->src[lex->pos])) {
+                frac += (lex->src[lex->pos] - '0') / divisor;
+                divisor *= 10.0;
+                lexer_advance(lex);
+            }
+            lex->current.type = TOK_FLOAT;
+            lex->current.data.floating = ((double)int_val + frac) * sign;
+            return true;
+        }
         lex->current.type = TOK_INT;
-        lex->current.data.integer = val * sign;
+        lex->current.data.integer = int_val * sign;
         return true;
     }
 
@@ -387,6 +403,14 @@ Goon_Value *goon_int(Goon_Ctx *ctx, int64_t i) {
     return val;
 }
 
+Goon_Value *goon_float(Goon_Ctx *ctx, double f) {
+    Goon_Value *val = alloc_value(ctx);
+    if (!val) return NULL;
+    val->type = GOON_FLOAT;
+    val->data.floating = f;
+    return val;
+}
+
 Goon_Value *goon_string(Goon_Ctx *ctx, const char *s) {
     Goon_Value *val = alloc_value(ctx);
     if (!val) return NULL;
@@ -440,6 +464,10 @@ bool goon_is_int(Goon_Value *val) {
     return val != NULL && val->type == GOON_INT;
 }
 
+bool goon_is_float(Goon_Value *val) {
+    return val != NULL && val->type == GOON_FLOAT;
+}
+
 bool goon_is_string(Goon_Value *val) {
     return val != NULL && val->type == GOON_STRING;
 }
@@ -462,6 +490,11 @@ bool goon_to_bool(Goon_Value *val) {
 int64_t goon_to_int(Goon_Value *val) {
     if (val == NULL || val->type != GOON_INT) return 0;
     return val->data.integer;
+}
+
+double goon_to_float(Goon_Value *val) {
+    if (val == NULL || val->type != GOON_FLOAT) return 0.0;
+    return val->data.floating;
 }
 
 const char *goon_to_string(Goon_Value *val) {
@@ -665,11 +698,14 @@ static Goon_Value *interpolate_string(Goon_Ctx *ctx, const char *str) {
 
                 if (val) {
                     const char *insert = NULL;
-                    char num_buf[32];
+                    char num_buf[64];
                     if (val->type == GOON_STRING) {
                         insert = val->data.string;
                     } else if (val->type == GOON_INT) {
                         snprintf(num_buf, sizeof(num_buf), "%ld", val->data.integer);
+                        insert = num_buf;
+                    } else if (val->type == GOON_FLOAT) {
+                        snprintf(num_buf, sizeof(num_buf), "%g", val->data.floating);
                         insert = num_buf;
                     } else if (val->type == GOON_BOOL) {
                         insert = val->data.boolean ? "true" : "false";
@@ -1015,6 +1051,11 @@ static Goon_Value *parse_primary(Parser *p) {
     switch (tok.type) {
         case TOK_INT: {
             Goon_Value *val = goon_int(p->ctx, tok.data.integer);
+            if (!lexer_next(p->lex)) return NULL;
+            return val;
+        }
+        case TOK_FLOAT: {
+            Goon_Value *val = goon_float(p->ctx, tok.data.floating);
             if (!lexer_next(p->lex)) return NULL;
             return val;
         }
@@ -1545,6 +1586,13 @@ static void value_to_json(String_Builder *sb, Goon_Value *val, int indent, int d
         case GOON_INT: {
             char num[32];
             snprintf(num, sizeof(num), "%ld", val->data.integer);
+            sb_append(sb, num);
+            break;
+        }
+
+        case GOON_FLOAT: {
+            char num[64];
+            snprintf(num, sizeof(num), "%g", val->data.floating);
             sb_append(sb, num);
             break;
         }

@@ -251,6 +251,7 @@ const char *owl_display_get_socket(owl_display *display);
 void owl_display_get_pointer(owl_display *display, int *x, int *y);
 owl_window **owl_display_get_windows(owl_display *display, int *count);
 owl_output **owl_display_get_outputs(owl_display *display, int *count);
+owl_output *owl_output_at(owl_display *display, int x, int y);
 owl_layer_surface **owl_display_get_layer_surfaces(owl_display *display, int *count);
 struct wl_event_loop *owl_display_get_event_loop(owl_display *display);
 void owl_display_request_frame(owl_display *display);
@@ -262,6 +263,19 @@ void owl_window_resize(owl_window *window, int width, int height);
 void owl_window_close(owl_window *window);
 void owl_window_set_fullscreen(owl_window *window, bool fullscreen);
 void owl_window_set_tiled(owl_window *window, bool tiled);
+
+/* Output configuration */
+typedef struct owl_output_mode {
+	int width;
+	int height;
+	int refresh;
+	bool preferred;
+} owl_output_mode;
+
+owl_output_mode *owl_output_get_modes(owl_output *output, int *count);
+void owl_output_free_modes(owl_output_mode *modes);
+bool owl_output_set_mode(owl_output *output, int width, int height, int refresh);
+void owl_output_set_position(owl_output *output, int x, int y);
 
 /* Workspace actions */
 owl_workspace *owl_workspace_create(owl_display *display, const char *name);

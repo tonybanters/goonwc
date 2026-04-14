@@ -78,6 +78,7 @@ static void config_set_defaults(goonwc_config *config) {
 	config->startup_cmd = NULL;
 	config->window_rule_count = 0;
 	config->keybind_count = 0;
+	config->output_config_count = 0;
 }
 
 static void config_free_strings(goonwc_config *config) {
@@ -88,6 +89,9 @@ static void config_free_strings(goonwc_config *config) {
 	for (int i = 0; i < config->keybind_count; i++) {
 		if (config->keybinds[i].action == ACTION_SPAWN)
 			free(config->keybinds[i].arg.cmd);
+	}
+	for (int i = 0; i < config->output_config_count; i++) {
+		free(config->output_configs[i].name);
 	}
 	free(config->terminal);
 	free(config->startup_cmd);
@@ -255,6 +259,85 @@ static void parse_window_rules(Goon_Value *rules, goonwc_config *config) {
 	}
 }
 
+static goonwc_transform parse_transform(const char *str) {
+	if (!str) return GOONWC_TRANSFORM_NORMAL;
+	if (strcmp(str, "90") == 0) return GOONWC_TRANSFORM_90;
+	if (strcmp(str, "180") == 0) return GOONWC_TRANSFORM_180;
+	if (strcmp(str, "270") == 0) return GOONWC_TRANSFORM_270;
+	if (strcmp(str, "flipped") == 0) return GOONWC_TRANSFORM_FLIPPED;
+	if (strcmp(str, "flipped-90") == 0) return GOONWC_TRANSFORM_FLIPPED_90;
+	if (strcmp(str, "flipped-180") == 0) return GOONWC_TRANSFORM_FLIPPED_180;
+	if (strcmp(str, "flipped-270") == 0) return GOONWC_TRANSFORM_FLIPPED_270;
+	return GOONWC_TRANSFORM_NORMAL;
+}
+
+static bool parse_mode_string(const char *str, int *width, int *height, int *refresh) {
+	*width = 0;
+	*height = 0;
+	*refresh = 0;
+
+	int w, h;
+	float r = 0;
+	if (sscanf(str, "%dx%d@%f", &w, &h, &r) >= 2) {
+		*width = w;
+		*height = h;
+		*refresh = (int)(r * 1000);
+		return true;
+	}
+	return false;
+}
+
+static void parse_outputs(Goon_Value *outputs, goonwc_config *config) {
+	if (!outputs || !goon_is_list(outputs)) return;
+	size_t len = goon_list_len(outputs);
+
+	for (size_t i = 0; i < len && config->output_config_count < GOONWC_MAX_OUTPUT_CONFIGS; i++) {
+		Goon_Value *out = goon_list_get(outputs, i);
+		if (!out || !goon_is_record(out)) continue;
+
+		Goon_Value *name_val = goon_record_get(out, "name");
+		if (!name_val || !goon_is_string(name_val)) continue;
+
+		goonwc_output_config *oc = &config->output_configs[config->output_config_count++];
+		memset(oc, 0, sizeof(*oc));
+		oc->scale = 1.0f;
+
+		oc->name = strdup(goon_to_string(name_val));
+
+		Goon_Value *mode_val = goon_record_get(out, "mode");
+		if (mode_val && goon_is_string(mode_val)) {
+			if (parse_mode_string(goon_to_string(mode_val), &oc->width, &oc->height, &oc->refresh)) {
+				oc->mode_set = true;
+			}
+		}
+
+		Goon_Value *pos_val = goon_record_get(out, "position");
+		if (pos_val && goon_is_record(pos_val)) {
+			Goon_Value *x_val = goon_record_get(pos_val, "x");
+			Goon_Value *y_val = goon_record_get(pos_val, "y");
+			if (x_val && goon_is_int(x_val)) oc->x = (int)goon_to_int(x_val);
+			if (y_val && goon_is_int(y_val)) oc->y = (int)goon_to_int(y_val);
+			oc->position_set = true;
+		}
+
+		Goon_Value *scale_val = goon_record_get(out, "scale");
+		if (scale_val) {
+			if (goon_is_float(scale_val)) oc->scale = (float)goon_to_float(scale_val);
+			else if (goon_is_int(scale_val)) oc->scale = (float)goon_to_int(scale_val);
+		}
+
+		Goon_Value *transform_val = goon_record_get(out, "transform");
+		if (transform_val && goon_is_string(transform_val)) {
+			oc->transform = parse_transform(goon_to_string(transform_val));
+		}
+
+		Goon_Value *off_val = goon_record_get(out, "off");
+		if (off_val && goon_is_bool(off_val)) {
+			oc->off = goon_to_bool(off_val);
+		}
+	}
+}
+
 static bool config_load_goon(goonwc_server *server) {
 	Goon_Ctx *ctx = goon_create();
 	if (!ctx) return false;
@@ -297,10 +380,12 @@ static bool config_load_goon(goonwc_server *server) {
 
 	parse_window_rules(goon_record_get(root, "window_rules"), &server->config);
 	parse_keybinds(goon_record_get(root, "keys"), &server->config);
+	parse_outputs(goon_record_get(root, "outputs"), &server->config);
 
 	goon_destroy(ctx);
-	fprintf(stderr, "goonwc: loaded config (gap=%d, border=%d, keybinds=%d)\n",
-		server->config.gap, server->config.border_width, server->config.keybind_count);
+	fprintf(stderr, "goonwc: loaded config (gap=%d, border=%d, keybinds=%d, outputs=%d)\n",
+		server->config.gap, server->config.border_width, server->config.keybind_count,
+		server->config.output_config_count);
 	return true;
 }
 

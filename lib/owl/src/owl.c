@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -2516,6 +2517,140 @@ owl_output **owl_display_get_outputs(owl_display *display, int *count) {
 	}
 	*count = display->output_count;
 	return display->outputs;
+}
+
+owl_output *owl_output_at(owl_display *display, int x, int y) {
+	if (!display) return NULL;
+	for (int i = 0; i < display->output_count; i++) {
+		owl_output *out = display->outputs[i];
+		if (!out) continue;
+		if (x >= out->x && x < out->x + out->width &&
+		    y >= out->y && y < out->y + out->height) {
+			return out;
+		}
+	}
+	return display->output_count > 0 ? display->outputs[0] : NULL;
+}
+
+owl_output_mode *owl_output_get_modes(owl_output *output, int *count) {
+	if (!output || !count) {
+		if (count) *count = 0;
+		return NULL;
+	}
+
+	owl_display *display = output->display;
+	drmModeConnector *connector = drmModeGetConnector(display->drm_fd, output->drm_connector_id);
+	if (!connector) {
+		*count = 0;
+		return NULL;
+	}
+
+	owl_output_mode *modes = calloc(connector->count_modes, sizeof(owl_output_mode));
+	if (!modes) {
+		drmModeFreeConnector(connector);
+		*count = 0;
+		return NULL;
+	}
+
+	for (int i = 0; i < connector->count_modes; i++) {
+		drmModeModeInfo *m = &connector->modes[i];
+		modes[i].width = m->hdisplay;
+		modes[i].height = m->vdisplay;
+		modes[i].refresh = m->vrefresh * 1000;
+		modes[i].preferred = (m->type & DRM_MODE_TYPE_PREFERRED) != 0;
+	}
+
+	*count = connector->count_modes;
+	drmModeFreeConnector(connector);
+	return modes;
+}
+
+void owl_output_free_modes(owl_output_mode *modes) {
+	free(modes);
+}
+
+bool owl_output_set_mode(owl_output *output, int width, int height, int refresh) {
+	if (!output) return false;
+
+	owl_display *display = output->display;
+	drmModeConnector *connector = drmModeGetConnector(display->drm_fd, output->drm_connector_id);
+	if (!connector) return false;
+
+	drmModeModeInfo *best_mode = NULL;
+	int best_diff = INT_MAX;
+
+	for (int i = 0; i < connector->count_modes; i++) {
+		drmModeModeInfo *m = &connector->modes[i];
+		if (m->hdisplay == width && m->vdisplay == height) {
+			if (refresh == 0) {
+				if (!best_mode || m->vrefresh > best_mode->vrefresh) {
+					best_mode = m;
+				}
+			} else {
+				int diff = abs((int)(m->vrefresh * 1000) - refresh);
+				if (diff < best_diff) {
+					best_diff = diff;
+					best_mode = m;
+				}
+			}
+		}
+	}
+
+	if (!best_mode) {
+		drmModeFreeConnector(connector);
+		return false;
+	}
+
+	if (output->current_bo) {
+		gbm_surface_release_buffer(output->gbm_surface, output->current_bo);
+		output->current_bo = NULL;
+	}
+	if (output->egl_surface) {
+		eglDestroySurface(display->egl_display, output->egl_surface);
+		output->egl_surface = NULL;
+	}
+	if (output->gbm_surface) {
+		gbm_surface_destroy(output->gbm_surface);
+		output->gbm_surface = NULL;
+	}
+
+	memcpy(output->drm_mode, best_mode, sizeof(drmModeModeInfo));
+	output->width = best_mode->hdisplay;
+	output->height = best_mode->vdisplay;
+
+	output->gbm_surface = gbm_surface_create(display->gbm_device, output->width, output->height,
+		GBM_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
+
+	if (!output->gbm_surface) {
+		drmModeFreeConnector(connector);
+		return false;
+	}
+
+	output->egl_surface = eglCreateWindowSurface(display->egl_display, display->egl_config,
+		(EGLNativeWindowType)output->gbm_surface, NULL);
+
+	if (output->egl_surface == EGL_NO_SURFACE) {
+		gbm_surface_destroy(output->gbm_surface);
+		output->gbm_surface = NULL;
+		drmModeFreeConnector(connector);
+		return false;
+	}
+
+	drmModeSetCrtc(display->drm_fd, output->drm_crtc_id, -1, 0, 0,
+	               &output->drm_connector_id, 1, best_mode);
+
+	fprintf(stderr, "owl: output %s mode set to %dx%d@%d\n",
+		output->name, output->width, output->height, best_mode->vrefresh);
+
+	drmModeFreeConnector(connector);
+	owl_invoke_output_callback(display, OWL_OUTPUT_EVENT_MODE_CHANGE, output);
+	return true;
+}
+
+void owl_output_set_position(owl_output *output, int x, int y) {
+	if (!output) return;
+	output->x = x;
+	output->y = y;
 }
 
 /* ==========================================================================

@@ -57,9 +57,25 @@ typedef struct {
 	uint64_t start_time_ms;
 } goonwc_scroll_anim;
 
+#define GOONWC_MAX_OUTPUTS 8
+
+typedef struct {
+	owl_output *output;
+	int scroll_offset;
+	goonwc_toplevel *focused;
+	goonwc_scroll_anim scroll_anim;
+	bool gesture_active;
+	int gesture_start_offset;
+	goonwc_toplevel *gesture_start_focused;
+	double gesture_cumulative_dx;
+	goonwc_gesture_event gesture_history[GOONWC_GESTURE_HISTORY_SIZE];
+	int gesture_history_len;
+} goonwc_output_state;
+
 struct goonwc_toplevel {
 	goonwc_server *server;
 	owl_window *window;
+	owl_output *output;
 	unsigned int tags;
 	bool is_fullscreen;
 	goonwc_width width;
@@ -90,7 +106,6 @@ struct goonwc_server {
 	struct wl_event_source *config_event_source;
 
 	goonwc_toplevel *toplevels;
-	goonwc_toplevel *focused_tiled;
 	int toplevel_count;
 
 	goonwc_floating *floating;
@@ -100,15 +115,11 @@ struct goonwc_server {
 	bool floating_is_active;
 
 	unsigned int tagset;
-	int scroll_offset;
-	bool gesture_active;
-	int gesture_start_offset;
-	goonwc_toplevel *gesture_start_focused;
-	double gesture_cumulative_dx;
-	goonwc_gesture_event gesture_history[GOONWC_GESTURE_HISTORY_SIZE];
-	int gesture_history_len;
 
-	goonwc_scroll_anim scroll_anim;
+	goonwc_output_state output_states[GOONWC_MAX_OUTPUTS];
+	int output_count;
+	owl_output *active_output;
+
 	struct wl_event_source *anim_timer;
 
 	owl_workspace *workspaces[9];

@@ -11,6 +11,7 @@ typedef enum {
     GOON_NIL,
     GOON_BOOL,
     GOON_INT,
+    GOON_FLOAT,
     GOON_STRING,
     GOON_LIST,
     GOON_RECORD,
@@ -37,6 +38,7 @@ struct Goon_Value {
     union {
         bool boolean;
         int64_t integer;
+        double floating;
         char *string;
         struct {
             Goon_Value **items;
@@ -97,6 +99,7 @@ void goon_error_print(const Goon_Error *err);
 Goon_Value *goon_nil(Goon_Ctx *ctx);
 Goon_Value *goon_bool(Goon_Ctx *ctx, bool val);
 Goon_Value *goon_int(Goon_Ctx *ctx, int64_t val);
+Goon_Value *goon_float(Goon_Ctx *ctx, double val);
 Goon_Value *goon_string(Goon_Ctx *ctx, const char *val);
 Goon_Value *goon_list(Goon_Ctx *ctx);
 Goon_Value *goon_record(Goon_Ctx *ctx);
@@ -104,12 +107,14 @@ Goon_Value *goon_record(Goon_Ctx *ctx);
 bool goon_is_nil(Goon_Value *val);
 bool goon_is_bool(Goon_Value *val);
 bool goon_is_int(Goon_Value *val);
+bool goon_is_float(Goon_Value *val);
 bool goon_is_string(Goon_Value *val);
 bool goon_is_list(Goon_Value *val);
 bool goon_is_record(Goon_Value *val);
 
 bool goon_to_bool(Goon_Value *val);
 int64_t goon_to_int(Goon_Value *val);
+double goon_to_float(Goon_Value *val);
 const char *goon_to_string(Goon_Value *val);
 
 void goon_list_push(Goon_Ctx *ctx, Goon_Value *list, Goon_Value *item);

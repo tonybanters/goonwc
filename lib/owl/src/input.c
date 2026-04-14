@@ -254,11 +254,19 @@ static void handle_pointer_motion(owl_display *display, struct libinput_event_po
     display->pointer_y += dy;
 
     if (display->output_count > 0) {
-        owl_output *output = display->outputs[0];
-        if (display->pointer_x < 0) display->pointer_x = 0;
-        if (display->pointer_y < 0) display->pointer_y = 0;
-        if (display->pointer_x >= output->width) display->pointer_x = output->width - 1;
-        if (display->pointer_y >= output->height) display->pointer_y = output->height - 1;
+        int min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+        for (int i = 0; i < display->output_count; i++) {
+            owl_output *out = display->outputs[i];
+            if (!out) continue;
+            if (i == 0 || out->x < min_x) min_x = out->x;
+            if (i == 0 || out->y < min_y) min_y = out->y;
+            if (i == 0 || out->x + out->width > max_x) max_x = out->x + out->width;
+            if (i == 0 || out->y + out->height > max_y) max_y = out->y + out->height;
+        }
+        if (display->pointer_x < min_x) display->pointer_x = min_x;
+        if (display->pointer_y < min_y) display->pointer_y = min_y;
+        if (display->pointer_x >= max_x) display->pointer_x = max_x - 1;
+        if (display->pointer_y >= max_y) display->pointer_y = max_y - 1;
     }
 
     update_pointer_focus(display);

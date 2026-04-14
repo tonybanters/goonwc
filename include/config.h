@@ -10,6 +10,7 @@ typedef struct goonwc_server goonwc_server;
 
 #define GOONWC_MAX_WINDOW_RULES 64
 #define GOONWC_MAX_KEYBINDS 128
+#define GOONWC_MAX_OUTPUT_CONFIGS 8
 
 typedef enum {
 	ACTION_NONE,
@@ -45,6 +46,31 @@ typedef struct {
 	bool block_screen_capture;
 } goonwc_window_rule;
 
+typedef enum {
+	GOONWC_TRANSFORM_NORMAL,
+	GOONWC_TRANSFORM_90,
+	GOONWC_TRANSFORM_180,
+	GOONWC_TRANSFORM_270,
+	GOONWC_TRANSFORM_FLIPPED,
+	GOONWC_TRANSFORM_FLIPPED_90,
+	GOONWC_TRANSFORM_FLIPPED_180,
+	GOONWC_TRANSFORM_FLIPPED_270,
+} goonwc_transform;
+
+typedef struct {
+	char *name;
+	int width;
+	int height;
+	int refresh;
+	int x;
+	int y;
+	float scale;
+	goonwc_transform transform;
+	bool off;
+	bool position_set;
+	bool mode_set;
+} goonwc_output_config;
+
 typedef struct {
 	int gap;
 	int border_width;
@@ -61,6 +87,9 @@ typedef struct {
 
 	goonwc_keybind keybinds[GOONWC_MAX_KEYBINDS];
 	int keybind_count;
+
+	goonwc_output_config output_configs[GOONWC_MAX_OUTPUT_CONFIGS];
+	int output_config_count;
 } goonwc_config;
 
 bool config_init(goonwc_server *server, const char *path);
