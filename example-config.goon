@@ -1,0 +1,35 @@
+let terminal = "foot";
+let modkey = "alt";
+
+{
+	gap = 10;
+	border_width = 2;
+	border_focused = "#929dcc";
+	border_unfocused = "#4d4d4d";
+	repeat_rate = 35;
+	repeat_delay = 200;
+	terminal = terminal;
+
+	keys = [
+		{ mod = [modkey]; key = "Return"; action = "spawn-terminal"; },
+		{ mod = [modkey]; key = "p"; action = "spawn"; arg = "rofi -show drun"; },
+		{ mod = [modkey]; key = "q"; action = "kill"; },
+		{ mod = [modkey, "shift"]; key = "Q"; action = "quit"; },
+		{ mod = [modkey]; key = "r"; action = "reload-config"; },
+
+		{ mod = [modkey]; key = "h"; action = "focus-prev"; },
+		{ mod = [modkey]; key = "l"; action = "focus-next"; },
+		{ mod = [modkey]; key = "minus"; action = "toggle-width"; arg = -1; },
+		{ mod = [modkey]; key = "equal"; action = "toggle-width"; arg = 1; },
+		{ mod = [modkey]; key = "f"; action = "maximize"; },
+		{ mod = [modkey]; key = "space"; action = "toggle-floating"; },
+
+		...tag_binds([modkey], "view-tag", 1, 9),
+		...tag_binds([modkey, "shift"], "move-to-tag", 1, 9),
+		...tag_binds([modkey, "ctrl"], "toggle-view-tag", 1, 9),
+	];
+
+	window_rules = [
+		{ match.app_id = "firefox"; block_screen_capture = true; },
+	];
+}
